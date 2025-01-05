@@ -23,7 +23,20 @@
 ## Installation
 
 1. **Clone or Download** this repo.
-2. **Copy** the `ct` script to a folder in your `$PATH` (e.g., `/usr/local/bin/ct`).
+2. **Copy** the `ct.sh` script to a folder in your `$PATH` (e.g., `/usr/local/bin/ct`).
 3. **Make it Executable**:
    ```bash
    chmod +x /usr/local/bin/ct
+
+## Create configuration directory
+
+sudo mkdir -p /etc/colortail
+sudo cp ct.conf /etc/colortail/ct.conf
+
+## Edit the config to your liking
+vim /etc/colortail/ct.conf
+
+## Usage
+
+tail -f /var/log/logfile.log | ct
+
