@@ -27,16 +27,21 @@
 3. **Make it Executable**:
    ```bash
    chmod +x /usr/local/bin/ct
+   ```
 
 ## Create configuration directory
 
-sudo mkdir -p /etc/colortail
+```
+sudo mkdir /etc/colortail
 sudo cp ct.conf /etc/colortail/ct.conf
+```
 
 ## Edit the config to your liking
+```
 vim /etc/colortail/ct.conf
-
+```
 ## Usage
 
+```
 tail -f /var/log/logfile.log | ct
-
+```
