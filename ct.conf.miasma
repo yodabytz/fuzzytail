@@ -1,0 +1,92 @@
+# /etc/colortail/ct.conf
+# Theme: Miasma — xterm-256 approximations from xero/miasma.nvim
+#
+# Base color for non-matching text (Normal fg):
+#   #D7C483 → 187  ← recommended
+#
+# Core palette (approx xterm-256):
+#   error        #B36D43 → 130
+#   warn         #C9A554 → 179
+#   accent       #BB7744 → 173
+#   ok/green     #5F875F → 65
+#   ident/olive  #78824B → 100
+#   dim/comment  #666666 → 242
+#   cursor-brown #685742 → 95
+#   bg-dark      #1C1C1C → 234  (not emitted; terminal handles bg)
+#
+base:187
+
+# ===== LINE HIGHLIGHTS =====
+line:ALERT=130
+
+# ===== TIMESTAMPS / IDS =====
+# ISO: YYYY-MM-DD[ T]HH:MM:SS(.ms)?(Z|±HH:MM)?
+word:[0-9]{4}-[0-9]{2}-[0-9]{2}(?:[[:space:]]+|T)[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]{3,6})?(?:[[:space:]]?(?:Z|[+\-][0-9]{2}:[0-9]{2}))?=179
+# Syslog: Mon DD HH:MM:SS
+word:(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[[:space:]]+[0-9]{1,2}[[:space:]]+[0-9]{2}:[0-9]{2}:[0-9]{2}=179
+# PIDs / bracketed ids / UUIDs
+word:(?:^|[[:space:]])(pid|PID)=[0-9]+=100
+word:\[[0-9]+\]=100
+word:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}=100
+
+# ===== URLS / EMAILS (email BEFORE hostname) =====
+# Email — full address, one solid color (olive ident)
+word:[A-Za-z0-9._%+\-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}=100
+# Hostnames — only at BOL or after whitespace
+word:(^|[[:space:]])([A-Za-z0-9-]+\.)+[A-Za-z]{2,}=173
+# URLs
+word:(https?|ftp):\/\/[^[:space:]]+=173
+
+# ===== NETWORK / ADDRESSES =====
+word:(?:[0-9]{1,3}\.){3}[0-9]{1,3}=65
+word:(?:[0-9A-Fa-f]{0,4}:){2,7}[0-9A-Fa-f]{0,4}=65
+word:(?:[0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}=65
+word:port[[:space:]]*[0-9]{2,5}=95
+
+# ===== HTTP =====
+word:(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)=100
+# Status codes (space-anchored to avoid ANSI fragments)
+word:[[:space:]]2[0-9]{2}[[:space:]]=65
+word:[[:space:]]3[0-9]{2}[[:space:]]=179
+word:[[:space:]]4[0-9]{2}[[:space:]]=173
+word:[[:space:]]5[0-9]{2}[[:space:]]=130
+word:(user-agent|referer|host|connection|content-(type|length))=242
+
+# ===== AUTH / SECURITY =====
+word:(sshd|sudo|PAM|fail2ban|iptables|nftables|selinux|auditd)=100
+word:(auth|authentication|authorized|unauthorized|login|logout|failed|failure|expired|locked|ban|banned|deny|denied|forbidden)=130
+word:(Ban detected|authentication failure|maximum authentication attempts)=130
+
+# ===== DAEMONS / SERVICES =====
+word:(postfix(\/[a-z]+)?|dovecot|imap-login|pop3-login|amavis|spamd|clamd|opendmarc)=100
+word:(nginx|apache2|httpd|php(-fpm)?|php[0-9.]*-fpm)=100
+word:(mariadb|mysql|mysqld|postgres|postgresql)=100
+word:(systemd|cron|CRON|kernel|docker|containerd|journald|ufw)=242
+
+# ===== SEVERITY / LEVELS =====
+word:(EMERG|EMERGENCY)=130
+word:ALERT=130
+word:(CRIT|CRITICAL)=130
+word:(ERR|ERROR)=130
+word:(WARN|WARNING)=179
+word:NOTICE=179
+word:INFO=187
+word:(DEBUG|TRACE)=242
+word:[Ee][Rr][Rr][Oo][Rr]=130
+word:[Ww][Aa][Rr][Nn](?:[Ii][Nn][Gg])?=179
+word:[Ii][Nn][Ff][Oo]=187
+word:[Dd][Ee][Bb][Uu][Gg]=242
+
+# ===== CONNECTION / STATE =====
+word:(timeout|timed[ -]?out|reset by peer|connection (refused|closed|reset)|disconnected|unreachable)=173
+word:(listening on|accepted|established)=65
+word:(reject|rejected|dropped|blocked)=130
+word:(restart(?:ed)?|start(?:ed)?|stop(?:ped)?|reload(?:ed)?)=179
+
+# ===== SSL / TLS / CERT / DISK / OOM =====
+word:(SSL|TLS|certificate|certbot|letsencrypt|handshake|protocol)=100
+word:(verify (ok|failed)|self[ -]signed|expired certificate)=173
+word:(read-only file system|No space left on device|I\/O error)=173
+word:(Out of memory|Killed process|oom-killer)=130
+word:(segfault|stack trace|core dumped)=130
+word:(NXDOMAIN|SERVFAIL|REFUSED)=173
