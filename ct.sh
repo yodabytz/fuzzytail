@@ -1,56 +1,65 @@
 #!/usr/bin/env bash
-
-# ct - Color Tail
-# Usage: tail -f /var/log/logfile.log | ct
-# Reads rules from /etc/colortail/ct.conf
-# Supports base:COLOR to set default line color.
-# Uses Perl regex with ANSI-skip to avoid recoloring colored spans.
+# ct - Color Tail (ordered, Perl regex, ANSI-safe, solid email color)
 
 set -uo pipefail
+export LC_ALL=C
 
 CONFIG_FILE="/etc/colortail/ct.conf"
-declare -A LINE_COLORS
-declare -A WORD_COLORS
-BASE_COLOR="252"  # Dracula neutral gray; overridden by base: in config
 
-# Read config
+BASE_COLOR=""
+LINE_PATTERNS=()
+LINE_COLORS=()
+WORD_PATTERNS=()
+WORD_COLORS=()
+
+# Read config IN ORDER
 while IFS='' read -r configLine; do
   [[ "$configLine" =~ ^#|^$ ]] && continue
-  if [[ "$configLine" =~ ^base:([0-9]{1,3})$ ]]; then
+  if   [[ "$configLine" =~ ^base:([0-9]{1,3})$ ]]; then
     BASE_COLOR="${BASH_REMATCH[1]}"
   elif [[ "$configLine" =~ ^line:(.*)=(.*)$ ]]; then
-    LINE_COLORS["${BASH_REMATCH[1]}"]="${BASH_REMATCH[2]}"
+    LINE_PATTERNS+=("${BASH_REMATCH[1]}")
+    LINE_COLORS+=("${BASH_REMATCH[2]}")
   elif [[ "$configLine" =~ ^word:(.*)=(.*)$ ]]; then
-    WORD_COLORS["${BASH_REMATCH[1]}"]="${BASH_REMATCH[2]}"
+    WORD_PATTERNS+=("${BASH_REMATCH[1]}")
+    WORD_COLORS+=("${BASH_REMATCH[2]}")
   fi
 done < "$CONFIG_FILE"
 
-# ANSI-skip for perl: skip already-colored regions
-ANSI_SKIP='\x1b\[[0-9;]*m.*?\x1b\[0m(*SKIP)(*F)|'
+perl_color() {
+  BASE="$1" COL="$2" PAT="$3" \
+  perl -pe '
+    use strict; use warnings;
+    my $base = defined $ENV{BASE} ? $ENV{BASE} : "";
+    my $col  = $ENV{COL};
+    my $pat  = qr{$ENV{PAT}};                            # safe for / in patterns
+    my $ansi = qr{\x1b\[[0-9;]*m.*?\x1b\[0m};            # existing colored spans
+    s/$ansi(*SKIP)(*F)|$pat/
+      "\x1b[38;5;".$col."m".$&.($base ne "" ? "\x1b[38;5;".$base."m" : "\x1b[0m]")
+    /eg;
+  '
+}
 
 while IFS='' read -r logLine; do
   coloredLine="$logLine"
-  lineColored=0
 
-  # Line-level color (first match wins)
-  for pattern in "${!LINE_COLORS[@]}"; do
-    if [[ "$logLine" =~ $pattern ]]; then
-      ansiColor="${LINE_COLORS[$pattern]}"
-      coloredLine=$'\033'"[38;5;${ansiColor}m${logLine}"$'\033'"[0m"
-      lineColored=1
-      break
+  # Line-level (first match wins)
+  for i in "${!LINE_PATTERNS[@]}"; do
+    if [[ "$logLine" =~ ${LINE_PATTERNS[$i]} ]]; then
+      coloredLine=$'\033[38;5;'"${LINE_COLORS[$i]}m${logLine}"$'\033[0m'
+      printf '%b\n' "$coloredLine"
+      continue 2
     fi
   done
 
-  # Word-level coloring only if no line-level rule
-  if [[ "$lineColored" -eq 0 ]]; then
-    for pattern in "${!WORD_COLORS[@]}"; do
-      ansiColor="${WORD_COLORS[$pattern]}"
-      # Return to BASE_COLOR after each match (not full reset)
-      coloredLine="$(printf '%s' "$coloredLine" | perl -pe "s/${ANSI_SKIP}${pattern}/\e[38;5;${ansiColor}m\$&\e[38;5;${BASE_COLOR}m/g")"
-    done
-    # Apply base color to the whole line at the very end
-    coloredLine=$'\033'"[38;5;${BASE_COLOR}m${coloredLine}"$'\033'"[0m"
+  # Word-level (in order; emails before hostnames in config)
+  for i in "${!WORD_PATTERNS[@]}"; do
+    coloredLine="$(printf '%s' "$coloredLine" | perl_color "${BASE_COLOR}" "${WORD_COLORS[$i]}" "${WORD_PATTERNS[$i]}")"
+  done
+
+  # Apply base color last (does NOT block word colors)
+  if [[ -n "$BASE_COLOR" ]]; then
+    coloredLine=$'\033[38;5;'"${BASE_COLOR}m${coloredLine}"$'\033[0m'
   fi
 
   printf '%b\n' "$coloredLine"
