@@ -33,7 +33,7 @@
 
 ```
 sudo mkdir /etc/colortail
-sudo cp ct.conf /etc/colortail/ct.conf
+sudo cp ct.conf.theme /etc/colortail/ct.conf
 ```
 
 ## Edit the config to your liking
