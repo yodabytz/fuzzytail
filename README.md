@@ -23,7 +23,7 @@
 ## Installation
 
 1. **Clone or Download** this repo.
-2. **Copy** the `ct.sh` script to a folder in your `$PATH` (e.g., `/usr/local/bin/ct`).
+2. **Copy** the `ct.pl` script to a folder in your `$PATH` (e.g., `/usr/local/bin/ct`).
 3. **Make it Executable**:
    ```bash
    chmod +x /usr/local/bin/ct
