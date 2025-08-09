@@ -1,0 +1,95 @@
+# /etc/colortail/ct.conf
+# Theme: Rosé Pine — xterm-256 approximations
+#
+# Base color for non-matching text:
+#   Subtle  (#908caa) → xterm-256: 103  ← recommended
+#   Muted   (#6e6a86) → xterm-256: 102  (dimmer option)
+#   Text    (#e0def4) → xterm-256: 189  (brighter option)
+#
+# Palette (approx xterm-256):
+#   love  (#eb6f92) → 211
+#   gold  (#f6c177) → 223
+#   rose  (#ea9a97) → 216
+#   pine  (#3e8fb0) → 110
+#   foam  (#9ccfd8) → 117
+#   iris  (#c4a7e7) → 183
+#   subtle(#908caa) → 103
+#   muted (#6e6a86) → 102
+#   text  (#e0def4) → 189
+#
+base:103
+
+# ===== LINE HIGHLIGHTS =====
+line:ALERT=211
+
+# ===== TIMESTAMPS / IDS =====
+# ISO: YYYY-MM-DD[ T]HH:MM:SS(.ms)?(Z|±HH:MM)?
+word:[0-9]{4}-[0-9]{2}-[0-9]{2}(?:[[:space:]]+|T)[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]{3,6})?(?:[[:space:]]?(?:Z|[+\-][0-9]{2}:[0-9]{2}))?=223
+# Syslog: Mon DD HH:MM:SS
+word:(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[[:space:]]+[0-9]{1,2}[[:space:]]+[0-9]{2}:[0-9]{2}:[0-9]{2}=223
+# PIDs / UUIDs
+word:(?:^|[[:space:]])(pid|PID)=[0-9]+=102
+word:\[[0-9]+\]=102
+word:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}=102
+
+# ===== URLS / EMAILS (email BEFORE hostname) =====
+# Email — FULL address, one solid color
+word:[A-Za-z0-9._%+\-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}=211
+# Hostnames — only at BOL or after whitespace (won’t match inside emails)
+word:(^|[[:space:]])([A-Za-z0-9-]+\.)+[A-Za-z]{2,}=189
+# URLs
+word:(https?|ftp):\/\/[^[:space:]]+=110
+
+# ===== NETWORK / ADDRESSES =====
+word:(?:[0-9]{1,3}\.){3}[0-9]{1,3}=117
+word:(?:[0-9A-Fa-f]{0,4}:){2,7}[0-9A-Fa-f]{0,4}=117
+word:(?:[0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}=110
+word:port[[:space:]]*[0-9]{2,5}=110
+
+# ===== HTTP =====
+word:(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)=183
+# Safe status codes (anchored so they never hit ANSI like ;xxxm)
+word:[[:space:]]2[0-9]{2}[[:space:]]=110
+word:[[:space:]]3[0-9]{2}[[:space:]]=223
+word:[[:space:]]4[0-9]{2}[[:space:]]=216
+word:[[:space:]]5[0-9]{2}[[:space:]]=211
+word:(user-agent|referer|host|connection|content-(type|length))=102
+
+# ===== AUTH / SECURITY =====
+word:(sshd|sudo|PAM|fail2ban|iptables|nftables|selinux|auditd)=183
+word:(auth|authentication|authorized|unauthorized|login|logout|failed|failure|expired|locked|ban|banned|deny|denied|forbidden)=211
+word:(Ban detected|authentication failure|maximum authentication attempts)=211
+
+# ===== DAEMONS / SERVICES =====
+word:(postfix(\/[a-z]+)?|dovecot|imap-login|pop3-login|amavis|spamd|clamd|opendmarc)=183
+word:(nginx|apache2|httpd|php(-fpm)?|php[0-9.]*-fpm)=110
+word:(mariadb|mysql|mysqld|postgres|postgresql)=110
+word:(systemd|cron|CRON|kernel|docker|containerd|journald|ufw)=102
+
+# ===== SEVERITY / LEVELS =====
+word:(EMERG|EMERGENCY)=211
+word:ALERT=211
+word:(CRIT|CRITICAL)=211
+word:(ERR|ERROR)=211
+word:(WARN|WARNING)=216
+word:NOTICE=223
+word:INFO=103
+word:(DEBUG|TRACE)=102
+word:[Ee][Rr][Rr][Oo][Rr]=211
+word:[Ww][Aa][Rr][Nn](?:[Ii][Nn][Gg])?=216
+word:[Ii][Nn][Ff][Oo]=103
+word:[Dd][Ee][Bb][Uu][Gg]=102
+
+# ===== CONNECTION / STATE =====
+word:(timeout|timed[ -]?out|reset by peer|connection (refused|closed|reset)|disconnected|unreachable)=216
+word:(listening on|accepted|established)=110
+word:(reject|rejected|dropped|blocked)=211
+word:(restart(?:ed)?|start(?:ed)?|stop(?:ped)?|reload(?:ed)?)=223
+
+# ===== SSL / TLS / CERT / DISK / OOM =====
+word:(SSL|TLS|certificate|certbot|letsencrypt|handshake|protocol)=110
+word:(verify (ok|failed)|self[ -]signed|expired certificate)=216
+word:(read-only file system|No space left on device|I\/O error)=216
+word:(Out of memory|Killed process|oom-killer)=211
+word:(segfault|stack trace|core dumped)=211
+word:(NXDOMAIN|SERVFAIL|REFUSED)=216
