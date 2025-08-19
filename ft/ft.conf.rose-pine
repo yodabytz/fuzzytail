@@ -1,4 +1,4 @@
-# /etc/colortail/ct.conf
+# /etc/ftail/ft.conf
 # Theme: Rosé Pine — xterm-256 approximations
 #
 # Base color for non-matching text:
