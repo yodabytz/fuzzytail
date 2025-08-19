@@ -1,6 +1,6 @@
-# Color Tail
+# FuzzyTail
 
-**Color Tail** is a small script that applies configurable color highlights to streaming log data. It reads from a configuration file (`/etc/colortail/ct.conf`) and colorizes matching lines or words using ANSI escape codes.
+**FuzzyTail** is a small script that applies configurable color highlights to streaming log data. It reads from a configuration file (`/etc/FuzzyTail/ct.conf`) and colorizes matching lines or words using ANSI escape codes.
 
 ---
 
@@ -32,13 +32,13 @@
 ## Create configuration directory
 
 ```
-sudo mkdir /etc/colortail
-sudo cp ct.conf.theme /etc/colortail/ct.conf
+sudo mkdir /etc/FuzzyTail
+sudo cp ct.conf.theme /etc/FuzzyTail/ct.conf
 ```
 
 ## Edit the config to your liking
 ```
-vim /etc/colortail/ct.conf
+vim /etc/FuzzyTail/ct.conf
 ```
 ## Usage
 
