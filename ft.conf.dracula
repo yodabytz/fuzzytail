@@ -1,4 +1,4 @@
-# /etc/colortail/ct.conf
+# /etc/ftail/ct.conf
 # Theme: Dracula — xterm-256 approximations
 #
 # Base color for non-matching text:
