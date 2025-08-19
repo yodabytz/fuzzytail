@@ -1,6 +1,6 @@
 # FuzzyTail
 
-**FuzzyTail** is a small script that applies configurable color highlights to streaming log data. It reads from a configuration file (`/etc/FuzzyTail/ct.conf`) and colorizes matching lines or words using ANSI escape codes.
+**FuzzyTail** is a small script that applies configurable color highlights to streaming log data. It reads from a configuration file (`/etc/FuzzyTail/ft.conf`) and colorizes matching lines or words using ANSI escape codes.
 
 ---
 
@@ -23,25 +23,25 @@
 ## Installation
 
 1. **Clone or Download** this repo.
-2. **Copy** the `ct.pl` script to a folder in your `$PATH` (e.g., `/usr/local/bin/ct`).
+2. **Copy** the `ftail.pl` script to a folder in your `$PATH` (e.g., `/usr/local/bin/ftail`).
 3. **Make it Executable**:
    ```bash
-   chmod +x /usr/local/bin/ct
+   chmod +x /usr/local/bin/ftail
    ```
 
 ## Create configuration directory
 
 ```
-sudo mkdir /etc/FuzzyTail
-sudo cp ct.conf.theme /etc/FuzzyTail/ct.conf
+sudo mkdir /etc/fuzzytail
+sudo cp ft.conf.theme /etc/fuzzytail/ft.conf
 ```
 
 ## Edit the config to your liking
 ```
-vim /etc/FuzzyTail/ct.conf
+vim /etc/fuzzytail/ft.conf
 ```
 ## Usage
 
 ```
-tail -f /var/log/logfile.log | ct
+tail -f /var/log/logfile.log | ftail
 ```
