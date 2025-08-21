@@ -1,0 +1,23 @@
+# Rust build artifacts
+/target/
+
+# For binary crates, uncomment the following line to include Cargo.lock:
+# Cargo.lock
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Local development files
+*.log
+debug_test*
+
+# Built binaries
+ft
+fuzzytail
