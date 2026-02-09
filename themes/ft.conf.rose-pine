@@ -18,6 +18,8 @@
 #   text  (#e0def4) → 189
 #
 base:103
+statusbar_bg:60
+statusbar_fg:255
 
 # ===== LINE HIGHLIGHTS =====
 line:ALERT=211

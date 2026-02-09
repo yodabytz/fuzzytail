@@ -10,6 +10,8 @@
 #   red 203, orange 215, yellow 229, green 84, cyan 117, purple 141, pink 212, comment 103, light 231, gray 252
 #
 base:103
+statusbar_bg:61
+statusbar_fg:255
 
 # ===== LINE HIGHLIGHTS =====
 line:ALERT=203

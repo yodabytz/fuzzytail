@@ -1,11 +1,11 @@
 [package]
 name = "fuzzytail"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
-authors = ["FuzzyTail Contributors"]
-description = "A modern, colorful tail replacement with true color support"
+authors = ["yodabytz"]
+description = "A modern, colorful tail replacement with split-pane log monitoring"
 license = "MIT"
-repository = "https://github.com/fuzzytail/fuzzytail"
+repository = "https://github.com/yodabytz/fuzzytail"
 
 [[bin]]
 name = "ft"
@@ -22,3 +22,4 @@ anyhow = "1.0"
 dirs = "5.0"
 serde_json = "1.0"
 is-terminal = "0.4"
+chrono = "0.4"

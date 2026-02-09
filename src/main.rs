@@ -13,7 +13,7 @@ use config::Config;
 
 #[derive(Parser)]
 #[command(name = "ft")]
-#[command(about = "A modern, colorful tail replacement with true color support")]
+#[command(about = "A modern, colorful tail replacement with split-pane log monitoring")]
 struct Cli {
     /// Files to tail
     #[arg(value_name = "FILE")]
@@ -35,9 +35,13 @@ struct Cli {
     #[arg(short = 'v', long = "verbose")]
     verbose: bool,
 
-    /// Follow file changes (like tail -f)
+    /// Follow file changes (like tail -f). Auto-enabled for multiple files.
     #[arg(short = 'f', long = "follow")]
     follow: bool,
+
+    /// Disable auto-follow when multiple files are given
+    #[arg(long = "no-follow")]
+    no_follow: bool,
 
     /// Config file path
     #[arg(long = "config")]
@@ -74,16 +78,25 @@ struct Cli {
 
 fn main() -> anyhow::Result<()> {
     let args = Cli::parse();
-    
+
     // Load configuration
     let config = Config::load(args.config.as_deref())?;
-    
+
+    // Auto-follow for multiple files (like multitail), unless --no-follow
+    let follow = if args.no_follow {
+        false
+    } else if args.files.len() > 1 {
+        true
+    } else {
+        args.follow
+    };
+
     // Initialize tail processor
     let mut tail_processor = tail::TailProcessor::new(
-        config, 
-        args.no_color, 
-        args.include, 
-        args.exclude, 
+        config,
+        args.no_color,
+        args.include,
+        args.exclude,
         args.level,
         args.interactive,
         args.format,
@@ -92,21 +105,17 @@ fn main() -> anyhow::Result<()> {
         args.quiet,
         args.verbose,
     )?;
-    
+
     if args.files.is_empty() {
-        // Check if stdin has data or if we should show default logs
         use is_terminal::IsTerminal;
         if std::io::stdin().is_terminal() {
-            // Interactive terminal - show helpful default behavior
             tail_processor.show_default_logs(args.lines)?;
         } else {
-            // Data piped in - read from stdin
-            tail_processor.process_stdin(args.lines, args.follow)?;
+            tail_processor.process_stdin(args.lines, follow)?;
         }
     } else {
-        // Process files
-        tail_processor.process_files(&args.files, args.lines, args.follow)?;
+        tail_processor.process_files(&args.files, args.lines, follow)?;
     }
-    
+
     Ok(())
 }

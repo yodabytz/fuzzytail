@@ -25,6 +25,8 @@
 #   gray9    (#dddddd) → 253
 #
 base:66
+statusbar_bg:238
+statusbar_fg:252
 
 # ===== LINE HIGHLIGHTS =====
 line:ALERT=160

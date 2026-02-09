@@ -7,6 +7,8 @@ use std::path::Path;
 pub struct Theme {
     pub name: String,
     pub base_color: Option<u8>,
+    pub statusbar_bg: Option<Color>,
+    pub statusbar_fg: Option<Color>,
     pub line_rules: Vec<ColorRule>,
     pub word_rules: Vec<ColorRule>,
 }
@@ -47,21 +49,31 @@ impl Theme {
     
     fn parse_theme_contents(contents: String, name: String) -> Result<Self> {
         let mut base_color = None;
+        let mut statusbar_bg = None;
+        let mut statusbar_fg = None;
         let mut line_rules = Vec::new();
         let mut word_rules = Vec::new();
-        
+
         for (line_num, line) in contents.lines().enumerate() {
             let line = line.trim();
-            
+
             // Skip comments and empty lines
             if line.is_empty() || line.starts_with('#') {
                 continue;
             }
-            
+
             let line_context = || format!("Line {}: {}", line_num + 1, line);
-            
+
             if let Some(caps) = Self::parse_base_line(line) {
                 base_color = Some(caps);
+            } else if line.starts_with("statusbar_bg:") {
+                if let Ok(c) = Self::parse_color(line["statusbar_bg:".len()..].trim()) {
+                    statusbar_bg = Some(c);
+                }
+            } else if line.starts_with("statusbar_fg:") {
+                if let Ok(c) = Self::parse_color(line["statusbar_fg:".len()..].trim()) {
+                    statusbar_fg = Some(c);
+                }
             } else if let Some(rule) = Self::parse_line_rule(line).with_context(line_context)? {
                 line_rules.push(rule);
             } else if let Some(rule) = Self::parse_word_rule(line).with_context(line_context)? {
@@ -70,10 +82,12 @@ impl Theme {
                 eprintln!("Warning: Unrecognized line in theme {}: {}", name, line);
             }
         }
-        
+
         Ok(Theme {
             name,
             base_color,
+            statusbar_bg,
+            statusbar_fg,
             line_rules,
             word_rules,
         })
@@ -83,6 +97,14 @@ impl Theme {
         if line.starts_with("base:") {
             let color_str = &line[5..].trim();
             color_str.parse().ok()
+        } else {
+            None
+        }
+    }
+
+    fn parse_u8_field(line: &str, prefix: &str) -> Option<u8> {
+        if line.starts_with(prefix) {
+            line[prefix.len()..].trim().parse().ok()
         } else {
             None
         }

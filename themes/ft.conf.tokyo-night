@@ -1,13 +1,7 @@
-# /etc/colortail/ct.conf
-# Theme: Tokyo Night (Night) — xterm-256 approximations
+# Theme: Tokyo Night (Night) — matched to multitail tokyonight
 #
-# Base color for non-matching text:
-#   Comment   (#565f89) → xterm-256: 103  ← recommended
-#   Text      (#c0caf5) → xterm-256: 189  (brighter option)
-#   Neutral   (gray)    → xterm-256: 252  (alternative)
-#
-# Palette (approx xterm-256):
-#   red        (#f7768e) → 204
+# Palette (xterm-256):
+#   red        (#f7768e) → 210
 #   orange     (#ff9e64) → 215
 #   yellow     (#e0af68) → 179
 #   green      (#9ece6a) → 149
@@ -15,51 +9,61 @@
 #   cyan       (#7dcfff) → 117
 #   blue       (#7aa2f7) → 111
 #   magenta    (#bb9af7) → 183
+#   lavender   (#afafff) → 147
 #   comment    (#565f89) → 103
 #   text       (#c0caf5) → 189
+#   gold       (#af8700) → 137
+#   muted      (#949494) → 246
+#   crit       (#d75faf) → 167
+#   pink       (#ffafff) → 219
+#   salmon     (#ff5f5f) → 203
 #
-base:103
+base:147
+statusbar_bg:103
+statusbar_fg:255
 
 # ===== LINE HIGHLIGHTS =====
-line:ALERT=204
+line:ALERT=167
 
 # ===== TIMESTAMPS / IDS =====
-# ISO: YYYY-MM-DD[ T]HH:MM:SS(.ms)?(Z|±HH:MM)?
-word:[0-9]{4}-[0-9]{2}-[0-9]{2}(?:[[:space:]]+|T)[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]{3,6})?(?:[[:space:]]?(?:Z|[+\-][0-9]{2}:[0-9]{2}))?=179
+# ISO: YYYY-MM-DD[ T]HH:MM:SS(.ms)?(Z|+HH:MM)?
+word:[0-9]{4}-[0-9]{2}-[0-9]{2}(?:[[:space:]]+|T)[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]{3,6})?(?:[[:space:]]?(?:Z|[+\-][0-9]{2}:[0-9]{2}))?=137
 # Syslog: Mon DD HH:MM:SS
-word:(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[[:space:]]+[0-9]{1,2}[[:space:]]+[0-9]{2}:[0-9]{2}:[0-9]{2}=179
+word:(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[[:space:]]+[0-9]{1,2}[[:space:]]+[0-9]{2}:[0-9]{2}:[0-9]{2}=137
 # PIDs / UUIDs
 word:(?:^|[[:space:]])(pid|PID)=[0-9]+=103
-word:\[[0-9]+\]=103
+word:\[[0-9]+\]=117
 word:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}=103
 
 # ===== URLS / EMAILS (email BEFORE hostname) =====
-# Email — FULL address, one solid color
-word:[A-Za-z0-9._%+\-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}=183
-# Hostnames — only at BOL or after whitespace (won’t match inside emails)
+# Email
+word:[A-Za-z0-9._%+\-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}=219
+# Hostnames — only at BOL or after whitespace
 word:(^|[[:space:]])([A-Za-z0-9-]+\.)+[A-Za-z]{2,}=189
 # URLs
 word:(https?|ftp):\/\/[^[:space:]]+=111
 
 # ===== NETWORK / ADDRESSES =====
-word:(?:[0-9]{1,3}\.){3}[0-9]{1,3}=117
+word:(?:[0-9]{1,3}\.){3}[0-9]{1,3}=179
 word:(?:[0-9A-Fa-f]{0,4}:){2,7}[0-9A-Fa-f]{0,4}=117
 word:(?:[0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}=80
 word:port[[:space:]]*[0-9]{2,5}=111
 
 # ===== HTTP =====
 word:(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)=111
-# Safe status codes (anchored so they never hit ANSI like ;xxxm)
+# Status codes
 word:[[:space:]]2[0-9]{2}[[:space:]]=149
-word:[[:space:]]3[0-9]{2}[[:space:]]=179
-word:[[:space:]]4[0-9]{2}[[:space:]]=215
-word:[[:space:]]5[0-9]{2}[[:space:]]=204
-word:(user-agent|referer|host|connection|content-(type|length))=103
+word:[[:space:]]3[0-9]{2}[[:space:]]=215
+word:[[:space:]]4[0-9]{2}[[:space:]]=210
+word:[[:space:]]5[0-9]{2}[[:space:]]=203
+word:(user-agent|referer|host|connection|content-(type|length))=117
 
 # ===== AUTH / SECURITY =====
 word:(sshd|sudo|PAM|fail2ban|iptables|nftables|selinux|auditd)=111
 word:(auth|authentication|authorized|unauthorized|login|logout|failed|failure|expired|locked|ban|banned|deny|denied|forbidden)=183
-word:(Ban detected|authentication failure|maximum authentication attempts)=204
+word:(Ban detected|authentication failure|maximum authentication attempts)=210
+word:Accepted (password|publickey)=149
+word:Failed password=210
 
 # ===== DAEMONS / SERVICES =====
 word:(postfix(\/[a-z]+)?|dovecot|imap-login|pop3-login|amavis|spamd|clamd|opendmarc)=111
@@ -68,29 +72,29 @@ word:(mariadb|mysql|mysqld|postgres|postgresql)=111
 word:(systemd|cron|CRON|kernel|docker|containerd|journald|ufw)=103
 
 # ===== SEVERITY / LEVELS =====
-word:(EMERG|EMERGENCY)=204
-word:ALERT=204
-word:(CRIT|CRITICAL)=204
-word:(ERR|ERROR)=204
-word:(WARN|WARNING)=215
+word:(EMERG|EMERGENCY)=167
+word:ALERT=167
+word:(CRIT|CRITICAL)=167
+word:(ERR|ERROR)=210
+word:(WARN|WARNING)=179
 word:NOTICE=179
-word:INFO=252
-word:(DEBUG|TRACE)=103
-word:[Ee][Rr][Rr][Oo][Rr]=204
-word:[Ww][Aa][Rr][Nn](?:[Ii][Nn][Gg])?=215
-word:[Ii][Nn][Ff][Oo]=252
-word:[Dd][Ee][Bb][Uu][Gg]=103
+word:INFO=149
+word:(DEBUG|TRACE)=246
+word:[Ee][Rr][Rr][Oo][Rr]=210
+word:[Ww][Aa][Rr][Nn](?:[Ii][Nn][Gg])?=179
+word:[Ii][Nn][Ff][Oo]=149
+word:[Dd][Ee][Bb][Uu][Gg]=246
 
 # ===== CONNECTION / STATE =====
 word:(timeout|timed[ -]?out|reset by peer|connection (refused|closed|reset)|disconnected|unreachable)=215
 word:(listening on|accepted|established)=149
-word:(reject|rejected|dropped|blocked)=204
+word:(reject|rejected|dropped|blocked)=210
 word:(restart(?:ed)?|start(?:ed)?|stop(?:ped)?|reload(?:ed)?)=179
 
 # ===== SSL / TLS / CERT / DISK / OOM =====
-word:(SSL|TLS|certificate|certbot|letsencrypt|handshake|protocol)=111
+word:(SSL|TLS|certificate|certbot|letsencrypt|handshake|protocol)=183
 word:(verify (ok|failed)|self[ -]signed|expired certificate)=215
 word:(read-only file system|No space left on device|I\/O error)=215
-word:(Out of memory|Killed process|oom-killer)=204
-word:(segfault|stack trace|core dumped)=204
+word:(Out of memory|Killed process|oom-killer)=210
+word:(segfault|stack trace|core dumped)=210
 word:(NXDOMAIN|SERVFAIL|REFUSED)=215
