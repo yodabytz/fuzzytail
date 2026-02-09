@@ -43,7 +43,7 @@ word:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0
 # Email — FULL address, one color
 word:[A-Za-z0-9._%+\-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}=218
 # Hostnames — anchor so they never match inside emails
-word:(?:(?<=^)|(?<=\s))([A-Za-z0-9-]+\.)+[A-Za-z]{2,}(?=\s|$|[\/:])=189
+word:(?:^|\s)([A-Za-z0-9-]+\.)+[A-Za-z]{2,}=189
 # URLs
 word:(?:https?|ftp):\/\/\S+=183
 
@@ -56,10 +56,10 @@ word:port[[:space:]]*[0-9]{2,5}=111
 # ===== HTTP =====
 word:(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)=189
 # Safe status codes (won’t touch timestamps)
-word:(?<=\s)2[0-9]{2}(?=\s|$)=151
-word:(?<=\s)3[0-9]{2}(?=\s|$)=229
-word:(?<=\s)4[0-9]{2}(?=\s|$)=216
-word:(?<=\s)5[0-9]{2}(?=\s|$)=211
+word:\s2[0-9]{2}\s=151
+word:\s3[0-9]{2}\s=229
+word:\s4[0-9]{2}\s=216
+word:\s5[0-9]{2}\s=211
 word:(user-agent|referer|host|connection|content-(type|length))=103
 
 # ===== AUTH / SECURITY =====
