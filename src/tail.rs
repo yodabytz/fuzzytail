@@ -377,7 +377,7 @@ impl TailProcessor {
             // Check keyboard
             if poll(Duration::from_millis(0))? {
                 if let Event::Key(key) = read()? {
-                    if key.kind != KeyEventKind::Press { continue; }
+                    if key.kind == KeyEventKind::Release { continue; }
                     match key.code {
                         KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => break,
                         KeyCode::Char('q') | KeyCode::Esc => break,
@@ -820,7 +820,7 @@ impl TailProcessor {
             // Handle input
             if poll(Duration::from_millis(100))? {
                 if let Event::Key(key) = read()? {
-                    if key.kind != KeyEventKind::Press { continue; }
+                    if key.kind == KeyEventKind::Release { continue; }
                     match key.code {
                         KeyCode::Char('q') | KeyCode::Esc => break,
                         KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => break,
@@ -902,7 +902,7 @@ impl TailProcessor {
         loop {
             if poll(Duration::from_millis(100))? {
                 if let Event::Key(key) = read()? {
-                    if key.kind == KeyEventKind::Press { break; }
+                    if key.kind != KeyEventKind::Release { break; }
                 }
             }
         }

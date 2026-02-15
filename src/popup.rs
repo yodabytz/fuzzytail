@@ -128,7 +128,7 @@ pub fn popup_info(title: &str, lines: &[String], colors: &PopupColors) -> Result
     loop {
         if poll(Duration::from_millis(100))? {
             if let Event::Key(key) = read()? {
-                if key.kind == KeyEventKind::Press { break; }
+                if key.kind != KeyEventKind::Release { break; }
             }
         }
     }
@@ -197,7 +197,7 @@ pub fn popup_menu(title: &str, items: &[String], colors: &PopupColors) -> Result
         // Read input
         if poll(Duration::from_millis(100))? {
             if let Event::Key(key) = read()? {
-                if key.kind != KeyEventKind::Press { continue; }
+                if key.kind == KeyEventKind::Release { continue; }
                 match key.code {
                     KeyCode::Up => {
                         if selected > 0 { selected -= 1; }
@@ -274,7 +274,7 @@ pub fn popup_input(title: &str, prompt: &str, default: &str, colors: &PopupColor
 
         if poll(Duration::from_millis(100))? {
             if let Event::Key(key) = read()? {
-                if key.kind != KeyEventKind::Press { continue; }
+                if key.kind == KeyEventKind::Release { continue; }
                 match key.code {
                     KeyCode::Enter | KeyCode::Char('\n') | KeyCode::Char('\r') => {
                         return Ok(PopupResult::Text(input));
