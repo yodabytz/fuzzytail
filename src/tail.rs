@@ -15,7 +15,7 @@ use std::thread;
 use crossterm::{
     cursor::{Hide, Show, MoveTo},
     style::{Color, Print, ResetColor, SetBackgroundColor, SetForegroundColor},
-    terminal::{Clear, ClearType, size, EnterAlternateScreen, LeaveAlternateScreen,
+    terminal::{size, EnterAlternateScreen, LeaveAlternateScreen,
                BeginSynchronizedUpdate, EndSynchronizedUpdate},
     event::{poll, read, Event, KeyCode, KeyModifiers},
     execute, queue,
@@ -27,10 +27,14 @@ struct FileTracker {
     file: File,
     position: u64,
     lines: VecDeque<String>,
+    raw_lines: VecDeque<String>,
     max_lines: usize,
     line_count: usize,
     last_update: std::time::SystemTime,
     file_id: Option<(u64, u64)>,
+    paused: bool,
+    filter: Option<LineFilter>,
+    search_term: Option<String>,
 }
 
 pub struct TailProcessor {
@@ -43,6 +47,7 @@ pub struct TailProcessor {
     bytes_mode: Option<usize>,
     quiet: bool,
     verbose: bool,
+    max_buffer_lines: usize,
 }
 
 impl TailProcessor {
@@ -58,6 +63,7 @@ impl TailProcessor {
         bytes_mode: Option<usize>,
         quiet: bool,
         verbose: bool,
+        max_buffer_lines: usize,
     ) -> Result<Self> {
         let theme_name = &config.general.theme;
         let theme_path = config.get_theme_path(theme_name)
@@ -81,6 +87,7 @@ impl TailProcessor {
             bytes_mode,
             quiet,
             verbose,
+            max_buffer_lines,
         })
     }
 
@@ -303,10 +310,14 @@ impl TailProcessor {
                 file,
                 position: pos,
                 lines: VecDeque::new(),
-                max_lines: 200,
+                raw_lines: VecDeque::new(),
+                max_lines: self.max_buffer_lines,
                 line_count: 0,
                 last_update: std::time::SystemTime::now(),
                 file_id,
+                paused: false,
+                filter: None,
+                search_term: None,
             };
 
             tracker.line_count = self.count_lines_in_file(&tracker.path).unwrap_or(0);
@@ -316,6 +327,7 @@ impl TailProcessor {
                     if self.filter.should_show_line(&line) {
                         let colored_line = self.colorizer.colorize_line(&line);
                         tracker.lines.push_back(colored_line);
+                        tracker.raw_lines.push_back(line);
                     }
                 }
             }
@@ -370,6 +382,186 @@ impl TailProcessor {
                         KeyCode::Char('q') | KeyCode::Esc => break,
                         KeyCode::Char('h') | KeyCode::F(1) => {
                             self.show_help(&file_trackers)?;
+                            self.render_frame(&file_trackers)?;
+                        }
+                        // Pause/resume all windows
+                        KeyCode::Char('p') => {
+                            let any_paused = file_trackers.iter().any(|t| t.paused);
+                            let new_state = !any_paused;
+                            for tracker in &mut file_trackers {
+                                tracker.paused = new_state;
+                            }
+                            self.render_frame(&file_trackers)?;
+                        }
+                        // Pause/resume one window
+                        KeyCode::Char('P') => {
+                            let names = Self::get_window_names(&file_trackers);
+                            let colors = crate::popup::PopupColors::from_theme(self.colorizer.get_theme());
+                            if let crate::popup::PopupResult::Selected(idx) = crate::popup::popup_select_window(&names, &colors)? {
+                                file_trackers[idx].paused = !file_trackers[idx].paused;
+                            }
+                            self.render_frame(&file_trackers)?;
+                        }
+                        // Clear all buffers
+                        KeyCode::Char('O') => {
+                            for tracker in &mut file_trackers {
+                                tracker.lines.clear();
+                                tracker.raw_lines.clear();
+                            }
+                            self.render_frame(&file_trackers)?;
+                        }
+                        // Clear one buffer
+                        KeyCode::Char('o') => {
+                            let names = Self::get_window_names(&file_trackers);
+                            let colors = crate::popup::PopupColors::from_theme(self.colorizer.get_theme());
+                            if let crate::popup::PopupResult::Selected(idx) = crate::popup::popup_select_window(&names, &colors)? {
+                                file_trackers[idx].lines.clear();
+                                file_trackers[idx].raw_lines.clear();
+                            }
+                            self.render_frame(&file_trackers)?;
+                        }
+                        // Info popup
+                        KeyCode::Char('i') => {
+                            self.show_info_popup(&file_trackers)?;
+                            self.render_frame(&file_trackers)?;
+                        }
+                        // Delete window
+                        KeyCode::Char('d') => {
+                            if file_trackers.len() > 1 {
+                                let names = Self::get_window_names(&file_trackers);
+                                let colors = crate::popup::PopupColors::from_theme(self.colorizer.get_theme());
+                                if let crate::popup::PopupResult::Selected(idx) = crate::popup::popup_select_window(&names, &colors)? {
+                                    let path = file_trackers[idx].path.clone();
+                                    let _ = watcher.unwatch(&path);
+                                    file_trackers.remove(idx);
+                                }
+                            }
+                            self.render_frame(&file_trackers)?;
+                        }
+                        // Swap two windows
+                        KeyCode::Char('s') => {
+                            if file_trackers.len() > 1 {
+                                let names = Self::get_window_names(&file_trackers);
+                                let colors = crate::popup::PopupColors::from_theme(self.colorizer.get_theme());
+                                let first = crate::popup::popup_menu(" Swap: Select first ", &names, &colors)?;
+                                if let crate::popup::PopupResult::Selected(idx1) = first {
+                                    let second = crate::popup::popup_menu(" Swap: Select second ", &names, &colors)?;
+                                    if let crate::popup::PopupResult::Selected(idx2) = second {
+                                        if idx1 != idx2 {
+                                            file_trackers.swap(idx1, idx2);
+                                        }
+                                    }
+                                }
+                            }
+                            self.render_frame(&file_trackers)?;
+                        }
+                        // Clear filter from window
+                        KeyCode::Char('e') => {
+                            let names = Self::get_window_names(&file_trackers);
+                            let colors = crate::popup::PopupColors::from_theme(self.colorizer.get_theme());
+                            if let crate::popup::PopupResult::Selected(idx) = crate::popup::popup_select_window(&names, &colors)? {
+                                file_trackers[idx].filter = None;
+                            }
+                            self.render_frame(&file_trackers)?;
+                        }
+                        // Set filter on window
+                        KeyCode::Char('f') => {
+                            let names = Self::get_window_names(&file_trackers);
+                            let colors = crate::popup::PopupColors::from_theme(self.colorizer.get_theme());
+                            if let crate::popup::PopupResult::Selected(idx) = crate::popup::popup_select_window(&names, &colors)? {
+                                let include_result = crate::popup::popup_input(" Filter ", "Include regex (empty=none):", "", &colors)?;
+                                if let crate::popup::PopupResult::Text(include_str) = include_result {
+                                    let exclude_result = crate::popup::popup_input(" Filter ", "Exclude regex (empty=none):", "", &colors)?;
+                                    if let crate::popup::PopupResult::Text(exclude_str) = exclude_result {
+                                        let include = if include_str.is_empty() { None } else { Some(include_str) };
+                                        let exclude = if exclude_str.is_empty() { None } else { Some(exclude_str) };
+                                        if let Ok(filter) = LineFilter::new(include, exclude, None) {
+                                            file_trackers[idx].filter = Some(filter);
+                                        }
+                                    }
+                                }
+                            }
+                            self.render_frame(&file_trackers)?;
+                        }
+                        // Add new file
+                        KeyCode::Char('a') => {
+                            let colors = crate::popup::PopupColors::from_theme(self.colorizer.get_theme());
+                            let result = crate::popup::popup_input(" Add File ", "File path:", "", &colors)?;
+                            if let crate::popup::PopupResult::Text(path_str) = result {
+                                let path = PathBuf::from(path_str.trim());
+                                if path.exists() {
+                                    if let Ok(file) = File::open(&path) {
+                                        let pos = file.metadata().map(|m| m.len()).unwrap_or(0);
+                                        let file_id = get_open_file_id(&file);
+                                        let mut tracker = FileTracker {
+                                            path: path.clone(),
+                                            file,
+                                            position: pos,
+                                            lines: VecDeque::new(),
+                                            raw_lines: VecDeque::new(),
+                                            max_lines: self.max_buffer_lines,
+                                            line_count: 0,
+                                            last_update: std::time::SystemTime::now(),
+                                            file_id,
+                                            paused: false,
+                                            filter: None,
+                                            search_term: None,
+                                        };
+                                        tracker.line_count = self.count_lines_in_file(&path).unwrap_or(0);
+                                        if let Ok(initial_lines) = self.get_last_n_lines(File::open(&path)?, 100) {
+                                            for line in initial_lines {
+                                                if self.filter.should_show_line(&line) {
+                                                    let colored_line = self.colorizer.colorize_line(&line);
+                                                    tracker.lines.push_back(colored_line);
+                                                    tracker.raw_lines.push_back(line);
+                                                }
+                                            }
+                                        }
+                                        let _ = watcher.watch(&path, RecursiveMode::NonRecursive);
+                                        file_trackers.push(tracker);
+                                    }
+                                }
+                            }
+                            self.render_frame(&file_trackers)?;
+                        }
+                        // Save buffer to file
+                        KeyCode::Char('w') => {
+                            let names = Self::get_window_names(&file_trackers);
+                            let colors = crate::popup::PopupColors::from_theme(self.colorizer.get_theme());
+                            if let crate::popup::PopupResult::Selected(idx) = crate::popup::popup_select_window(&names, &colors)? {
+                                let result = crate::popup::popup_input(" Save Buffer ", "Save to file:", "buffer.log", &colors)?;
+                                if let crate::popup::PopupResult::Text(save_path) = result {
+                                    let save_path = save_path.trim();
+                                    if !save_path.is_empty() {
+                                        if let Ok(mut f) = std::fs::File::create(save_path) {
+                                            for line in &file_trackers[idx].raw_lines {
+                                                let _ = writeln!(f, "{}", line);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            self.render_frame(&file_trackers)?;
+                        }
+                        // Scrollback browser
+                        KeyCode::Char('b') => {
+                            let names = Self::get_window_names(&file_trackers);
+                            let colors = crate::popup::PopupColors::from_theme(self.colorizer.get_theme());
+                            if let crate::popup::PopupResult::Selected(idx) = crate::popup::popup_select_window(&names, &colors)? {
+                                self.show_scrollback(&file_trackers[idx])?;
+                            }
+                            self.render_frame(&file_trackers)?;
+                        }
+                        // Search
+                        KeyCode::Char('/') => {
+                            let colors = crate::popup::PopupColors::from_theme(self.colorizer.get_theme());
+                            let result = crate::popup::popup_input(" Search ", "Search term (empty=clear):", "", &colors)?;
+                            if let crate::popup::PopupResult::Text(term) = result {
+                                let search = if term.trim().is_empty() { None } else { Some(term.trim().to_string()) };
+                                for tracker in &mut file_trackers {
+                                    tracker.search_term = search.clone();
+                                }
+                            }
                             self.render_frame(&file_trackers)?;
                         }
                         KeyCode::Char(c) if c.is_ascii_digit() => {
@@ -433,13 +625,41 @@ impl TailProcessor {
         let start = tracker.lines.len().saturating_sub(content_h);
         let visible: Vec<&String> = tracker.lines.iter().skip(start).take(content_h).collect();
 
+        // Build search regex if active
+        let search_re = tracker.search_term.as_ref().and_then(|term| {
+            regex::RegexBuilder::new(&regex::escape(term))
+                .case_insensitive(true)
+                .build()
+                .ok()
+        });
+
         // Draw content lines, each padded to full width (overwrites old content, no flicker)
         for i in 0..content_h {
             let row = y + i as u16;
             queue!(buf, MoveTo(0, row))?;
             if i < visible.len() {
-                let padded = pad_ansi(visible[i], w);
-                queue!(buf, Print(padded))?;
+                let line = visible[i];
+                // If search is active, highlight matches in the raw line
+                if let Some(ref re) = search_re {
+                    // Get corresponding raw line for search matching
+                    let raw_start = tracker.raw_lines.len().saturating_sub(content_h);
+                    if let Some(raw_line) = tracker.raw_lines.iter().skip(raw_start).nth(i) {
+                        if re.is_match(raw_line) {
+                            let highlighted = highlight_search_matches(line, raw_line, re);
+                            let padded = pad_ansi(&highlighted, w);
+                            queue!(buf, Print(padded))?;
+                        } else {
+                            let padded = pad_ansi(line, w);
+                            queue!(buf, Print(padded))?;
+                        }
+                    } else {
+                        let padded = pad_ansi(line, w);
+                        queue!(buf, Print(padded))?;
+                    }
+                } else {
+                    let padded = pad_ansi(line, w);
+                    queue!(buf, Print(padded))?;
+                }
             } else {
                 queue!(buf, Print(" ".repeat(w)))?;
             }
@@ -456,7 +676,18 @@ impl TailProcessor {
         let datetime = chrono::DateTime::<chrono::Local>::from(now);
         let time_str = datetime.format("%b %d %H:%M:%S %Y").to_string();
 
-        let left = format!("{}] {}", index, filepath);
+        let mut indicators = String::new();
+        if tracker.paused {
+            indicators.push_str(" [PAUSED]");
+        }
+        if tracker.filter.is_some() {
+            indicators.push_str(" [FILTER]");
+        }
+        if tracker.search_term.is_some() {
+            indicators.push_str(" [SEARCH]");
+        }
+
+        let left = format!("{}] {}{}", index, filepath, indicators);
         let right = format!("{} - {}", tracker.line_count, time_str);
         let gap = w.saturating_sub(left.len() + right.len());
         let mut bar = left;
@@ -480,57 +711,178 @@ impl TailProcessor {
         Ok(())
     }
 
-    fn show_help(&self, _file_trackers: &[FileTracker]) -> Result<()> {
-        let mut stdout = io::stdout();
-        let (width, _) = crossterm::terminal::size().unwrap_or((80, 24));
+    fn get_window_names(trackers: &[FileTracker]) -> Vec<String> {
+        trackers.iter().enumerate().map(|(i, t)| {
+            let name = t.path.file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("unknown");
+            let mut label = format!("[{}] {}", i, name);
+            if t.paused { label.push_str(" [PAUSED]"); }
+            if t.filter.is_some() { label.push_str(" [FILTER]"); }
+            label
+        }).collect()
+    }
 
-        execute!(stdout, Clear(ClearType::All), MoveTo(0, 0), Show)?;
+    fn show_info_popup(&self, trackers: &[FileTracker]) -> Result<()> {
+        let colors = crate::popup::PopupColors::from_theme(self.colorizer.get_theme());
+        let mut lines = vec![
+            format!("Windows: {}", trackers.len()),
+            format!("Buffer limit: {} lines", self.max_buffer_lines),
+            String::new(),
+        ];
+        for (i, tracker) in trackers.iter().enumerate() {
+            let name = tracker.path.file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("unknown");
+            let elapsed = tracker.last_update.elapsed().unwrap_or_default();
+            let status = if tracker.paused { "PAUSED" } else { "active" };
+            lines.push(format!("[{}] {} ({})", i, name, status));
+            lines.push(format!("    Lines: {} buf / {} total", tracker.lines.len(), tracker.line_count));
+            lines.push(format!("    Last update: {:.0}s ago", elapsed.as_secs()));
+            if tracker.filter.is_some() {
+                lines.push("    Filter: active".to_string());
+            }
+        }
+        crate::popup::popup_info(" Window Info ", &lines, &colors)
+    }
 
-        execute!(stdout, SetBackgroundColor(Color::Blue), SetForegroundColor(Color::White))?;
-        let title = format!("{:^w$}", "FuzzyTail Help", w = width as usize);
-        execute!(stdout, Print(&title), ResetColor)?;
-        println!();
+    fn show_scrollback(&self, tracker: &FileTracker) -> Result<()> {
+        let (tw, th) = size()?;
+        let total_lines = tracker.raw_lines.len();
+        if total_lines == 0 {
+            return Ok(());
+        }
 
-        println!();
-        println!("KEYBOARD COMMANDS:");
-        println!("  h / F1       - This help screen");
-        println!("  q / ESC      - Quit the program");
-        println!("  Ctrl+C       - Emergency exit");
-        println!("  1-9          - View single file full-screen");
-        println!();
-        println!("COMMAND LINE OPTIONS:");
-        println!("  ft <files>           - Tail files (auto-follow with multiple files)");
-        println!("  ft -f <file>         - Follow a single file");
-        println!("  ft -n 50 <file>      - Show last 50 lines");
-        println!("  ft --exclude <pat>   - Exclude lines matching pattern");
-        println!("  ft --include <pat>   - Show only lines matching pattern");
-        println!("  ft --level ERROR     - Filter by log level");
-        println!("  ft --no-color        - Disable color output");
-        println!("  ft --format json     - Output as JSON");
-        println!();
-        println!("FEATURES:");
-        println!("  Real-time log file monitoring");
-        println!("  Split-pane display for multiple files");
-        println!("  Theme-based syntax highlighting");
-        println!("  Regular expression filtering");
-        println!("  Log level filtering");
-        println!();
-
-        execute!(stdout, SetBackgroundColor(Color::DarkGrey), SetForegroundColor(Color::White))?;
-        let footer = format!("{:^w$}", "Press any key to return...", w = width as usize);
-        execute!(stdout, Print(&footer), ResetColor)?;
-        stdout.flush()?;
+        let content_h = (th - 2) as usize; // header + footer rows
+        let mut scroll_offset = total_lines.saturating_sub(content_h); // start at bottom
+        let search_re: Option<regex::Regex> = tracker.search_term.as_ref().and_then(|term| {
+            regex::RegexBuilder::new(&regex::escape(term))
+                .case_insensitive(true)
+                .build()
+                .ok()
+        });
 
         loop {
+            let mut buf: Vec<u8> = Vec::with_capacity(64 * 1024);
+            queue!(buf, BeginSynchronizedUpdate)?;
+
+            // Header
+            let theme = self.colorizer.get_theme();
+            let bar_bg = theme_color_to_ansi256(theme.statusbar_bg.as_ref(), 103);
+            let bar_fg = theme_color_to_ansi256(theme.statusbar_fg.as_ref(), 231);
+
+            let header = format!(" Scrollback: {} ({} lines) ", tracker.path.display(), total_lines);
+            let header_padded = format!("{:<width$}", header, width = tw as usize);
+            queue!(buf, MoveTo(0, 0), SetBackgroundColor(bar_bg), SetForegroundColor(bar_fg),
+                Print(&header_padded), ResetColor)?;
+
+            // Content lines
+            for i in 0..content_h {
+                let line_idx = scroll_offset + i;
+                queue!(buf, MoveTo(0, (i + 1) as u16))?;
+                if line_idx < total_lines {
+                    let raw_line = &tracker.raw_lines[line_idx];
+                    let colored = self.colorizer.colorize_line(raw_line);
+
+                    // Highlight search matches
+                    let display = if let Some(ref re) = search_re {
+                        if re.is_match(raw_line) {
+                            highlight_search_matches(&colored, raw_line, re)
+                        } else {
+                            colored
+                        }
+                    } else {
+                        colored
+                    };
+
+                    let padded = pad_ansi(&display, tw as usize);
+                    queue!(buf, Print(padded))?;
+                } else {
+                    queue!(buf, Print(" ".repeat(tw as usize)))?;
+                }
+            }
+
+            // Footer
+            let pos_str = format!(" Line {}-{} of {} | Arrows/PgUp/PgDn to scroll | q to return ",
+                scroll_offset + 1,
+                (scroll_offset + content_h).min(total_lines),
+                total_lines);
+            let footer_padded = format!("{:<width$}", pos_str, width = tw as usize);
+            queue!(buf, MoveTo(0, th - 1), SetBackgroundColor(bar_bg), SetForegroundColor(bar_fg),
+                Print(&footer_padded), ResetColor)?;
+
+            queue!(buf, EndSynchronizedUpdate)?;
+            let mut stdout = io::stdout().lock();
+            stdout.write_all(&buf)?;
+            stdout.flush()?;
+
+            // Handle input
             if poll(Duration::from_millis(100))? {
-                if let Event::Key(_) = read()? {
-                    break;
+                if let Event::Key(key) = read()? {
+                    match key.code {
+                        KeyCode::Char('q') | KeyCode::Esc => break,
+                        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => break,
+                        KeyCode::Up => {
+                            scroll_offset = scroll_offset.saturating_sub(1);
+                        }
+                        KeyCode::Down => {
+                            if scroll_offset + content_h < total_lines {
+                                scroll_offset += 1;
+                            }
+                        }
+                        KeyCode::PageUp => {
+                            scroll_offset = scroll_offset.saturating_sub(content_h);
+                        }
+                        KeyCode::PageDown => {
+                            scroll_offset = (scroll_offset + content_h).min(total_lines.saturating_sub(content_h));
+                        }
+                        KeyCode::Home => {
+                            scroll_offset = 0;
+                        }
+                        KeyCode::End => {
+                            scroll_offset = total_lines.saturating_sub(content_h);
+                        }
+                        _ => {}
+                    }
                 }
             }
         }
 
-        execute!(stdout, Clear(ClearType::All), Hide, MoveTo(0, 0))?;
         Ok(())
+    }
+
+    fn show_help(&self, _file_trackers: &[FileTracker]) -> Result<()> {
+        let colors = crate::popup::PopupColors::from_theme(self.colorizer.get_theme());
+        let lines = vec![
+            String::new(),
+            "NAVIGATION".to_string(),
+            "  h / F1       This help screen".to_string(),
+            "  q / ESC      Quit the program".to_string(),
+            "  Ctrl+C       Emergency exit".to_string(),
+            "  1-9          View single file full-screen".to_string(),
+            String::new(),
+            "MONITORING".to_string(),
+            "  p            Pause/resume all windows".to_string(),
+            "  P            Pause/resume one window".to_string(),
+            "  b            Scrollback buffer browser".to_string(),
+            "  /            Search in buffer".to_string(),
+            "  i            Window info/stats".to_string(),
+            String::new(),
+            "FILTERING".to_string(),
+            "  f            Set include/exclude filter".to_string(),
+            "  e            Clear filter from window".to_string(),
+            String::new(),
+            "WINDOW MANAGEMENT".to_string(),
+            "  a            Add new file to monitor".to_string(),
+            "  d            Delete a window".to_string(),
+            "  s            Swap two windows".to_string(),
+            String::new(),
+            "BUFFER".to_string(),
+            "  o            Clear one window buffer".to_string(),
+            "  O            Clear all buffers".to_string(),
+            "  w            Save buffer to file".to_string(),
+        ];
+        crate::popup::popup_info(" FuzzyTail Help ", &lines, &colors)
     }
 
     fn show_single_pane(&self, tracker: &FileTracker, index: usize) -> Result<()> {
@@ -570,10 +922,14 @@ impl TailProcessor {
                 file,
                 position: pos,
                 lines: VecDeque::new(),
+                raw_lines: VecDeque::new(),
                 max_lines: 10,
                 line_count: 0,
                 last_update: std::time::SystemTime::now(),
                 file_id,
+                paused: false,
+                filter: None,
+                search_term: None,
             };
 
             if let Ok(initial_lines) = self.get_last_n_lines(File::open(file_path)?, 5) {
@@ -689,6 +1045,11 @@ impl TailProcessor {
 
     /// Check for new content and log rotation. Returns true if the file was rotated.
     fn check_file_updates(&mut self, tracker: &mut FileTracker) -> Result<bool> {
+        // Skip updates when paused
+        if tracker.paused {
+            return Ok(false);
+        }
+
         let mut rotated = false;
 
         // Check for log rotation: file at path has different inode than our open handle
@@ -702,13 +1063,18 @@ impl TailProcessor {
                     let mut line = String::new();
                     while reader.read_line(&mut line)? > 0 {
                         let clean_line = line.trim_end().to_string();
-                        if self.filter.should_show_line(&clean_line) {
+                        let active_filter = tracker.filter.as_ref().unwrap_or(&self.filter);
+                        if active_filter.should_show_line(&clean_line) {
                             let colored_line = self.colorizer.colorize_line(&clean_line);
                             tracker.lines.push_back(colored_line);
+                            tracker.raw_lines.push_back(clean_line);
                             tracker.line_count += 1;
                             tracker.last_update = std::time::SystemTime::now();
                             while tracker.lines.len() > tracker.max_lines {
                                 tracker.lines.pop_front();
+                            }
+                            while tracker.raw_lines.len() > tracker.max_lines {
+                                tracker.raw_lines.pop_front();
                             }
                         }
                         line.clear();
@@ -742,14 +1108,19 @@ impl TailProcessor {
             let mut line = String::new();
             while reader.read_line(&mut line)? > 0 {
                 let clean_line = line.trim_end().to_string();
-                if self.filter.should_show_line(&clean_line) {
+                let active_filter = tracker.filter.as_ref().unwrap_or(&self.filter);
+                if active_filter.should_show_line(&clean_line) {
                     let colored_line = self.colorizer.colorize_line(&clean_line);
                     tracker.lines.push_back(colored_line);
+                    tracker.raw_lines.push_back(clean_line);
                     tracker.line_count += 1;
                     tracker.last_update = std::time::SystemTime::now();
 
                     while tracker.lines.len() > tracker.max_lines {
                         tracker.lines.pop_front();
+                    }
+                    while tracker.raw_lines.len() > tracker.max_lines {
+                        tracker.raw_lines.pop_front();
                     }
                 }
                 line.clear();
@@ -760,6 +1131,7 @@ impl TailProcessor {
             // File truncated in place (e.g., logrotate copytruncate)
             tracker.position = 0;
             tracker.lines.clear();
+            tracker.raw_lines.clear();
             tracker.line_count = 0;
             tracker.file.seek(SeekFrom::Start(0))?;
         }
@@ -845,7 +1217,7 @@ fn get_open_file_id(_file: &File) -> Option<(u64, u64)> {
 
 /// Convert theme Color to crossterm AnsiValue (256-color).
 /// Always uses AnsiValue for maximum terminal compatibility.
-fn theme_color_to_ansi256(c: Option<&crate::theme::Color>, default: u8) -> Color {
+pub(crate) fn theme_color_to_ansi256(c: Option<&crate::theme::Color>, default: u8) -> Color {
     match c {
         Some(crate::theme::Color::Xterm256(n)) => Color::AnsiValue(*n),
         Some(crate::theme::Color::TrueColor { r, g, b }) => {
@@ -857,7 +1229,7 @@ fn theme_color_to_ansi256(c: Option<&crate::theme::Color>, default: u8) -> Color
 }
 
 /// Approximate an RGB color to the nearest xterm-256 color (16-231 cube).
-fn rgb_to_xterm256(r: u8, g: u8, b: u8) -> u8 {
+pub(crate) fn rgb_to_xterm256(r: u8, g: u8, b: u8) -> u8 {
     let ri = ((r as u16 * 5 + 127) / 255) as u8;
     let gi = ((g as u16 * 5 + 127) / 255) as u8;
     let bi = ((b as u16 * 5 + 127) / 255) as u8;
@@ -866,7 +1238,64 @@ fn rgb_to_xterm256(r: u8, g: u8, b: u8) -> u8 {
 
 /// Truncate an ANSI-colored string to `max_width` visible chars, then pad with spaces
 /// to exactly `max_width`. No Clear escape codes needed — full overwrite.
-fn pad_ansi(s: &str, max_width: usize) -> String {
+/// Highlight search matches in a colored line by cross-referencing the raw line.
+/// Inserts reverse-video ANSI codes around matched portions.
+fn highlight_search_matches(colored: &str, raw: &str, re: &regex::Regex) -> String {
+    // Find match positions in the raw line
+    let match_ranges: Vec<(usize, usize)> = re.find_iter(raw).map(|m| (m.start(), m.end())).collect();
+    if match_ranges.is_empty() {
+        return colored.to_string();
+    }
+
+    // Walk through the colored string, mapping visible character positions to raw positions
+    let mut result = String::with_capacity(colored.len() + match_ranges.len() * 10);
+    let mut visible_pos = 0usize;
+    let mut in_escape = false;
+    let mut in_highlight = false;
+
+    for ch in colored.chars() {
+        if in_escape {
+            result.push(ch);
+            if ch.is_ascii_alphabetic() {
+                in_escape = false;
+            }
+            continue;
+        }
+
+        if ch == '\x1b' {
+            in_escape = true;
+            result.push(ch);
+            continue;
+        }
+
+        if ch.is_control() {
+            result.push(ch);
+            continue;
+        }
+
+        // Check if this visible position should be highlighted
+        let should_highlight = match_ranges.iter().any(|(s, e)| visible_pos >= *s && visible_pos < *e);
+
+        if should_highlight && !in_highlight {
+            result.push_str("\x1b[7m"); // reverse video on
+            in_highlight = true;
+        } else if !should_highlight && in_highlight {
+            result.push_str("\x1b[27m"); // reverse video off
+            in_highlight = false;
+        }
+
+        result.push(ch);
+        visible_pos += 1;
+    }
+
+    if in_highlight {
+        result.push_str("\x1b[27m");
+    }
+
+    result
+}
+
+pub(crate) fn pad_ansi(s: &str, max_width: usize) -> String {
     let mut result = String::with_capacity(s.len() + max_width);
     let mut visible = 0usize;
     let mut in_escape = false;

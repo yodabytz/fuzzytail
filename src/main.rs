@@ -8,6 +8,7 @@ mod colorizer;
 mod filter;
 mod interactive;
 mod output;
+mod popup;
 
 use config::Config;
 
@@ -74,6 +75,10 @@ struct Cli {
     /// Buffer size for file operations (in bytes)
     #[arg(long = "buffer-size", default_value = "65536")]
     buffer_size: usize,
+
+    /// Maximum lines to keep in scrollback buffer per window
+    #[arg(long = "buffer-lines", default_value = "1000")]
+    buffer_lines: usize,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -104,6 +109,7 @@ fn main() -> anyhow::Result<()> {
         args.bytes,
         args.quiet,
         args.verbose,
+        args.buffer_lines,
     )?;
 
     if args.files.is_empty() {

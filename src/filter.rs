@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use regex::Regex;
 
+#[derive(Clone)]
 pub struct LineFilter {
     include_regex: Option<Regex>,
     exclude_regex: Option<Regex>,
