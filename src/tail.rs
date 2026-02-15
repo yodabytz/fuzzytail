@@ -30,6 +30,7 @@ struct FileTracker {
     max_lines: usize,
     line_count: usize,
     last_update: std::time::SystemTime,
+    file_id: Option<(u64, u64)>,
 }
 
 pub struct TailProcessor {
@@ -195,8 +196,47 @@ impl TailProcessor {
 
         let mut file = File::open(file_path)?;
         let mut pos = file.seek(SeekFrom::End(0))?;
+        let mut file_id = get_open_file_id(&file);
 
         loop {
+            // Check for log rotation (file at path replaced with new inode)
+            if let (Some(ref current_id), Some(path_id)) = (&file_id, get_file_id(file_path)) {
+                if *current_id != path_id {
+                    // Drain remaining data from old (rotated) file
+                    let old_size = file.metadata().map(|m| m.len()).unwrap_or(pos);
+                    if old_size > pos {
+                        file.seek(SeekFrom::Start(pos))?;
+                        let mut reader = BufReader::with_capacity(self.buffer_size, &file);
+                        let mut line = String::new();
+                        while reader.read_line(&mut line)? > 0 {
+                            let clean_line = line.trim_end();
+                            if self.filter.should_show_line(clean_line) {
+                                let colored_line = self.colorizer.colorize_line(clean_line);
+                                let formatted = self.output_formatter.format_line(clean_line, &colored_line);
+                                println!("{}", formatted);
+                            }
+                            line.clear();
+                        }
+                    }
+
+                    // Reopen the new file at the same path
+                    match File::open(file_path) {
+                        Ok(new_file) => {
+                            file = new_file;
+                            pos = 0;
+                            file_id = get_open_file_id(&file);
+                            let _ = watcher.unwatch(file_path);
+                            let _ = watcher.watch(file_path, RecursiveMode::NonRecursive);
+                        }
+                        Err(_) => {
+                            // New file not yet created, try next cycle
+                            thread::sleep(Duration::from_millis(100));
+                            continue;
+                        }
+                    }
+                }
+            }
+
             let current_size = file.seek(SeekFrom::End(0))?;
             if current_size > pos {
                 file.seek(SeekFrom::Start(pos))?;
@@ -215,17 +255,15 @@ impl TailProcessor {
 
                 pos = current_size;
             } else if current_size < pos {
+                // File truncated in place (e.g., copytruncate)
                 pos = 0;
                 file.seek(SeekFrom::Start(0))?;
             }
 
             match rx.try_recv() {
                 Ok(_) => {}
-                Err(mpsc::TryRecvError::Empty) => {
+                Err(_) => {
                     thread::sleep(Duration::from_millis(100));
-                }
-                Err(mpsc::TryRecvError::Disconnected) => {
-                    return Err(anyhow!("File watcher disconnected"));
                 }
             }
         }
@@ -258,6 +296,7 @@ impl TailProcessor {
             let file = File::open(file_path)
                 .with_context(|| format!("Failed to open file: {:?}", file_path))?;
             let pos = file.metadata()?.len();
+            let file_id = get_open_file_id(&file);
 
             let mut tracker = FileTracker {
                 path: file_path.clone(),
@@ -267,6 +306,7 @@ impl TailProcessor {
                 max_lines: 200,
                 line_count: 0,
                 last_update: std::time::SystemTime::now(),
+                file_id,
             };
 
             tracker.line_count = self.count_lines_in_file(&tracker.path).unwrap_or(0);
@@ -294,24 +334,27 @@ impl TailProcessor {
         self.render_frame(&file_trackers)?;
 
         loop {
-            // Drain all pending watcher events (don't block)
+            // Drain all pending watcher events (non-blocking)
             loop {
                 match rx.try_recv() {
                     Ok(_) => {}
-                    Err(mpsc::TryRecvError::Empty) => break,
-                    Err(mpsc::TryRecvError::Disconnected) => {
-                        return Err(anyhow!("File watcher disconnected"));
-                    }
+                    Err(_) => break,
                 }
             }
 
-            // Check for new content
+            // Check for new content and log rotation
             let mut content_changed = false;
             for tracker in &mut file_trackers {
                 let old_len = tracker.lines.len();
-                self.check_file_updates(tracker)?;
+                let rotated = self.check_file_updates(tracker)?;
                 if tracker.lines.len() != old_len {
                     content_changed = true;
+                }
+                if rotated {
+                    content_changed = true;
+                    // Re-watch the new file at the same path
+                    let _ = watcher.unwatch(&tracker.path);
+                    let _ = watcher.watch(&tracker.path, RecursiveMode::NonRecursive);
                 }
             }
 
@@ -520,6 +563,7 @@ impl TailProcessor {
             let file = File::open(file_path)
                 .with_context(|| format!("Failed to open file: {:?}", file_path))?;
             let pos = file.metadata()?.len();
+            let file_id = get_open_file_id(&file);
 
             let mut tracker = FileTracker {
                 path: file_path.clone(),
@@ -529,6 +573,7 @@ impl TailProcessor {
                 max_lines: 10,
                 line_count: 0,
                 last_update: std::time::SystemTime::now(),
+                file_id,
             };
 
             if let Ok(initial_lines) = self.get_last_n_lines(File::open(file_path)?, 5) {
@@ -563,15 +608,49 @@ impl TailProcessor {
 
         loop {
             for tracker in &mut file_trackers {
+                let filename = tracker.path.file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("unknown")
+                    .to_string();
+
+                // Check for log rotation
+                let mut was_rotated = false;
+                if let (Some(ref open_id), Some(path_id)) = (&tracker.file_id, get_file_id(&tracker.path)) {
+                    if *open_id != path_id {
+                        // Drain remaining data from old (rotated) file
+                        let old_size = tracker.file.metadata().map(|m| m.len()).unwrap_or(tracker.position);
+                        if old_size > tracker.position {
+                            tracker.file.seek(SeekFrom::Start(tracker.position))?;
+                            let mut reader = BufReader::with_capacity(self.buffer_size, &tracker.file);
+                            let mut line = String::new();
+                            while reader.read_line(&mut line)? > 0 {
+                                let clean_line = line.trim_end().to_string();
+                                if self.filter.should_show_line(&clean_line) {
+                                    let colored_line = self.colorizer.colorize_line(&clean_line);
+                                    println!("[{}] {}", filename, colored_line);
+                                }
+                                line.clear();
+                            }
+                            tracker.position = old_size;
+                        }
+
+                        // Reopen the new file
+                        if let Ok(new_file) = File::open(&tracker.path) {
+                            tracker.file = new_file;
+                            tracker.position = 0;
+                            tracker.file_id = get_open_file_id(&tracker.file);
+                            let _ = watcher.unwatch(&tracker.path);
+                            let _ = watcher.watch(&tracker.path, RecursiveMode::NonRecursive);
+                            was_rotated = true;
+                        }
+                    }
+                }
+
                 let current_size = tracker.file.metadata()?.len();
 
                 if current_size > tracker.position {
                     tracker.file.seek(SeekFrom::Start(tracker.position))?;
                     let mut reader = BufReader::with_capacity(self.buffer_size, &tracker.file);
-
-                    let filename = tracker.path.file_name()
-                        .and_then(|n| n.to_str())
-                        .unwrap_or("unknown");
 
                     let mut line = String::new();
                     while reader.read_line(&mut line)? > 0 {
@@ -584,7 +663,8 @@ impl TailProcessor {
                     }
 
                     tracker.position = current_size;
-                } else if current_size < tracker.position {
+                } else if current_size < tracker.position && !was_rotated {
+                    // File truncated in place
                     tracker.position = 0;
                     tracker.file.seek(SeekFrom::Start(0))?;
                 }
@@ -592,11 +672,8 @@ impl TailProcessor {
 
             match rx.try_recv() {
                 Ok(_) => {}
-                Err(mpsc::TryRecvError::Empty) => {
+                Err(_) => {
                     thread::sleep(Duration::from_millis(100));
-                }
-                Err(mpsc::TryRecvError::Disconnected) => {
-                    break;
                 }
             }
         }
@@ -610,7 +687,52 @@ impl TailProcessor {
         Ok(reader.lines().count())
     }
 
-    fn check_file_updates(&mut self, tracker: &mut FileTracker) -> Result<()> {
+    /// Check for new content and log rotation. Returns true if the file was rotated.
+    fn check_file_updates(&mut self, tracker: &mut FileTracker) -> Result<bool> {
+        let mut rotated = false;
+
+        // Check for log rotation: file at path has different inode than our open handle
+        if let (Some(ref open_id), Some(path_id)) = (&tracker.file_id, get_file_id(&tracker.path)) {
+            if *open_id != path_id {
+                // Drain remaining data from old (rotated) file before switching
+                let old_size = tracker.file.metadata().map(|m| m.len()).unwrap_or(tracker.position);
+                if old_size > tracker.position {
+                    tracker.file.seek(SeekFrom::Start(tracker.position))?;
+                    let mut reader = BufReader::with_capacity(self.buffer_size, &tracker.file);
+                    let mut line = String::new();
+                    while reader.read_line(&mut line)? > 0 {
+                        let clean_line = line.trim_end().to_string();
+                        if self.filter.should_show_line(&clean_line) {
+                            let colored_line = self.colorizer.colorize_line(&clean_line);
+                            tracker.lines.push_back(colored_line);
+                            tracker.line_count += 1;
+                            tracker.last_update = std::time::SystemTime::now();
+                            while tracker.lines.len() > tracker.max_lines {
+                                tracker.lines.pop_front();
+                            }
+                        }
+                        line.clear();
+                    }
+                    tracker.position = old_size;
+                }
+
+                // Reopen the new file at the same path
+                match File::open(&tracker.path) {
+                    Ok(new_file) => {
+                        tracker.file = new_file;
+                        tracker.position = 0;
+                        tracker.file_id = get_open_file_id(&tracker.file);
+                        rotated = true;
+                        // Fall through to read new content below
+                    }
+                    Err(_) => {
+                        // New file not yet created (brief window during rotation)
+                        return Ok(false);
+                    }
+                }
+            }
+        }
+
         let current_size = tracker.file.metadata()?.len();
 
         if current_size > tracker.position {
@@ -634,13 +756,15 @@ impl TailProcessor {
             }
 
             tracker.position = current_size;
-        } else if current_size < tracker.position {
+        } else if current_size < tracker.position && !rotated {
+            // File truncated in place (e.g., logrotate copytruncate)
             tracker.position = 0;
             tracker.lines.clear();
+            tracker.line_count = 0;
             tracker.file.seek(SeekFrom::Start(0))?;
         }
 
-        Ok(())
+        Ok(rotated)
     }
 
     pub fn show_default_logs(&mut self, lines: usize) -> Result<()> {
@@ -693,6 +817,30 @@ impl TailProcessor {
 
         Ok(())
     }
+}
+
+/// Get the filesystem identity (device, inode) of a file path for rotation detection.
+#[cfg(unix)]
+fn get_file_id(path: &Path) -> Option<(u64, u64)> {
+    use std::os::unix::fs::MetadataExt;
+    std::fs::metadata(path).ok().map(|m| (m.dev(), m.ino()))
+}
+
+#[cfg(not(unix))]
+fn get_file_id(_path: &Path) -> Option<(u64, u64)> {
+    None
+}
+
+/// Get the filesystem identity of an already-open file handle.
+#[cfg(unix)]
+fn get_open_file_id(file: &File) -> Option<(u64, u64)> {
+    use std::os::unix::fs::MetadataExt;
+    file.metadata().ok().map(|m| (m.dev(), m.ino()))
+}
+
+#[cfg(not(unix))]
+fn get_open_file_id(_file: &File) -> Option<(u64, u64)> {
+    None
 }
 
 /// Convert theme Color to crossterm AnsiValue (256-color).
