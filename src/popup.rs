@@ -3,7 +3,7 @@ use crossterm::{
     cursor::MoveTo,
     style::{Color, Print, ResetColor, SetBackgroundColor, SetForegroundColor},
     terminal::{size, BeginSynchronizedUpdate, EndSynchronizedUpdate},
-    event::{poll, read, Event, KeyCode, KeyModifiers},
+    event::{poll, read, Event, KeyCode, KeyModifiers, KeyEventKind},
     queue,
 };
 use std::io::{self, Write};
@@ -124,11 +124,11 @@ pub fn popup_info(title: &str, lines: &[String], colors: &PopupColors) -> Result
     stdout.write_all(&buf)?;
     stdout.flush()?;
 
-    // Wait for any key
+    // Wait for any key press
     loop {
         if poll(Duration::from_millis(100))? {
-            if let Event::Key(_) = read()? {
-                break;
+            if let Event::Key(key) = read()? {
+                if key.kind == KeyEventKind::Press { break; }
             }
         }
     }
@@ -197,6 +197,7 @@ pub fn popup_menu(title: &str, items: &[String], colors: &PopupColors) -> Result
         // Read input
         if poll(Duration::from_millis(100))? {
             if let Event::Key(key) = read()? {
+                if key.kind != KeyEventKind::Press { continue; }
                 match key.code {
                     KeyCode::Up => {
                         if selected > 0 { selected -= 1; }
@@ -266,6 +267,7 @@ pub fn popup_input(title: &str, prompt: &str, default: &str, colors: &PopupColor
 
         if poll(Duration::from_millis(100))? {
             if let Event::Key(key) = read()? {
+                if key.kind != KeyEventKind::Press { continue; }
                 match key.code {
                     KeyCode::Enter => {
                         return Ok(PopupResult::Text(input));

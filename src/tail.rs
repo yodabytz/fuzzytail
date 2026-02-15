@@ -17,7 +17,7 @@ use crossterm::{
     style::{Color, Print, ResetColor, SetBackgroundColor, SetForegroundColor},
     terminal::{size, EnterAlternateScreen, LeaveAlternateScreen,
                BeginSynchronizedUpdate, EndSynchronizedUpdate},
-    event::{poll, read, Event, KeyCode, KeyModifiers},
+    event::{poll, read, Event, KeyCode, KeyModifiers, KeyEventKind},
     execute, queue,
 };
 use std::io::{self, Write};
@@ -377,6 +377,7 @@ impl TailProcessor {
             // Check keyboard
             if poll(Duration::from_millis(0))? {
                 if let Event::Key(key) = read()? {
+                    if key.kind != KeyEventKind::Press { continue; }
                     match key.code {
                         KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => break,
                         KeyCode::Char('q') | KeyCode::Esc => break,
@@ -819,6 +820,7 @@ impl TailProcessor {
             // Handle input
             if poll(Duration::from_millis(100))? {
                 if let Event::Key(key) = read()? {
+                    if key.kind != KeyEventKind::Press { continue; }
                     match key.code {
                         KeyCode::Char('q') | KeyCode::Esc => break,
                         KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => break,
@@ -899,8 +901,8 @@ impl TailProcessor {
 
         loop {
             if poll(Duration::from_millis(100))? {
-                if let Event::Key(_) = read()? {
-                    break;
+                if let Event::Key(key) = read()? {
+                    if key.kind == KeyEventKind::Press { break; }
                 }
             }
         }
