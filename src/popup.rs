@@ -207,7 +207,7 @@ pub fn popup_menu(title: &str, items: &[String], colors: &PopupColors) -> Result
                     }
                     KeyCode::Home => { selected = 0; }
                     KeyCode::End => { selected = items.len() - 1; }
-                    KeyCode::Enter => {
+                    KeyCode::Enter | KeyCode::Char('\n') | KeyCode::Char('\r') => {
                         return Ok(PopupResult::Selected(selected));
                     }
                     KeyCode::Esc => {
@@ -218,6 +218,13 @@ pub fn popup_menu(title: &str, items: &[String], colors: &PopupColors) -> Result
                     }
                     KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                         return Ok(PopupResult::Dismissed);
+                    }
+                    // Number keys select item directly
+                    KeyCode::Char(c) if c.is_ascii_digit() => {
+                        let n = c.to_digit(10).unwrap() as usize;
+                        if n < items.len() {
+                            return Ok(PopupResult::Selected(n));
+                        }
                     }
                     _ => {}
                 }
@@ -269,7 +276,7 @@ pub fn popup_input(title: &str, prompt: &str, default: &str, colors: &PopupColor
             if let Event::Key(key) = read()? {
                 if key.kind != KeyEventKind::Press { continue; }
                 match key.code {
-                    KeyCode::Enter => {
+                    KeyCode::Enter | KeyCode::Char('\n') | KeyCode::Char('\r') => {
                         return Ok(PopupResult::Text(input));
                     }
                     KeyCode::Esc => {
