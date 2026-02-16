@@ -9,7 +9,7 @@ use std::io::{BufRead, BufReader, stdin, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::collections::VecDeque;
 use notify::{Watcher, RecommendedWatcher, RecursiveMode, Config as NotifyConfig};
-use std::sync::mpsc;
+use std::sync::{mpsc, Arc, atomic::{AtomicBool, Ordering}};
 use std::time::Duration;
 use std::thread;
 use crossterm::{
@@ -208,7 +208,13 @@ impl TailProcessor {
         let mut pos = file.seek(SeekFrom::End(0))?;
         let mut file_id = get_open_file_id(&file);
 
-        loop {
+        let running = Arc::new(AtomicBool::new(true));
+        let r = running.clone();
+        ctrlc::set_handler(move || {
+            r.store(false, Ordering::SeqCst);
+        })?;
+
+        while running.load(Ordering::SeqCst) {
             // Check for log rotation (file at path replaced with new inode)
             if let (Some(ref current_id), Some(path_id)) = (&file_id, get_file_id(file_path)) {
                 if *current_id != path_id {
@@ -277,6 +283,8 @@ impl TailProcessor {
                 }
             }
         }
+
+        Ok(())
     }
 
     fn follow_multiple_files(&mut self, files: &[PathBuf]) -> Result<()> {
@@ -946,7 +954,13 @@ impl TailProcessor {
             println!();
         }
 
-        loop {
+        let running = Arc::new(AtomicBool::new(true));
+        let r = running.clone();
+        let _ = ctrlc::set_handler(move || {
+            r.store(false, Ordering::SeqCst);
+        });
+
+        while running.load(Ordering::SeqCst) {
             for tracker in &mut file_trackers {
                 let filename = tracker.path.file_name()
                     .and_then(|n| n.to_str())

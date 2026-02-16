@@ -1,6 +1,6 @@
 [package]
 name = "fuzzytail"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2021"
 authors = ["yodabytz"]
 description = "A modern, colorful tail replacement with split-pane log monitoring"
@@ -23,3 +23,4 @@ dirs = "5.0"
 serde_json = "1.0"
 is-terminal = "0.4"
 chrono = "0.4"
+ctrlc = "3.4"
