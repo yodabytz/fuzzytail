@@ -13,6 +13,9 @@
 # OS files
 .DS_Store
 Thumbs.db
+*.jpg
+*.png
+commands.txt
 
 # Local development files
 *.log
