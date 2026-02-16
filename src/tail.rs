@@ -357,14 +357,11 @@ impl TailProcessor {
             // Check for new content and log rotation
             let mut content_changed = false;
             for tracker in &mut file_trackers {
-                let old_len = tracker.lines.len();
-                let rotated = self.check_file_updates(tracker)?;
-                if tracker.lines.len() != old_len {
+                let (rotated, had_new) = self.check_file_updates(tracker)?;
+                if had_new || rotated {
                     content_changed = true;
                 }
                 if rotated {
-                    content_changed = true;
-                    // Re-watch the new file at the same path
                     let _ = watcher.unwatch(&tracker.path);
                     let _ = watcher.watch(&tracker.path, RecursiveMode::NonRecursive);
                 }
@@ -435,23 +432,6 @@ impl TailProcessor {
                                     let path = file_trackers[idx].path.clone();
                                     let _ = watcher.unwatch(&path);
                                     file_trackers.remove(idx);
-                                }
-                            }
-                            self.render_frame(&file_trackers)?;
-                        }
-                        // Swap two windows
-                        KeyCode::Char('s') => {
-                            if file_trackers.len() > 1 {
-                                let names = Self::get_window_names(&file_trackers);
-                                let colors = crate::popup::PopupColors::from_theme(self.colorizer.get_theme());
-                                let first = crate::popup::popup_menu(" Swap: Select first ", &names, &colors)?;
-                                if let crate::popup::PopupResult::Selected(idx1) = first {
-                                    let second = crate::popup::popup_menu(" Swap: Select second ", &names, &colors)?;
-                                    if let crate::popup::PopupResult::Selected(idx2) = second {
-                                        if idx1 != idx2 {
-                                            file_trackers.swap(idx1, idx2);
-                                        }
-                                    }
                                 }
                             }
                             self.render_frame(&file_trackers)?;
@@ -877,7 +857,6 @@ impl TailProcessor {
             "WINDOW MANAGEMENT".to_string(),
             "  a            Add new file to monitor".to_string(),
             "  d            Delete a window".to_string(),
-            "  s            Swap two windows".to_string(),
             String::new(),
             "BUFFER".to_string(),
             "  o            Clear one window buffer".to_string(),
@@ -1046,13 +1025,15 @@ impl TailProcessor {
     }
 
     /// Check for new content and log rotation. Returns true if the file was rotated.
-    fn check_file_updates(&mut self, tracker: &mut FileTracker) -> Result<bool> {
+    /// Returns (rotated, had_new_content).
+    fn check_file_updates(&mut self, tracker: &mut FileTracker) -> Result<(bool, bool)> {
         // Skip updates when paused
         if tracker.paused {
-            return Ok(false);
+            return Ok((false, false));
         }
 
         let mut rotated = false;
+        let old_line_count = tracker.line_count;
 
         // Check for log rotation: file at path has different inode than our open handle
         if let (Some(ref open_id), Some(path_id)) = (&tracker.file_id, get_file_id(&tracker.path)) {
@@ -1095,7 +1076,7 @@ impl TailProcessor {
                     }
                     Err(_) => {
                         // New file not yet created (brief window during rotation)
-                        return Ok(false);
+                        return Ok((false, false));
                     }
                 }
             }
@@ -1138,7 +1119,7 @@ impl TailProcessor {
             tracker.file.seek(SeekFrom::Start(0))?;
         }
 
-        Ok(rotated)
+        Ok((rotated, tracker.line_count != old_line_count))
     }
 
     pub fn show_default_logs(&mut self, lines: usize) -> Result<()> {

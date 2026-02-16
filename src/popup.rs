@@ -42,6 +42,17 @@ impl PopupColors {
     }
 }
 
+/// Truncate a string to at most max_chars characters (UTF-8 safe).
+fn truncate_chars(s: &str, max_chars: usize) -> &str {
+    if s.len() <= max_chars {
+        return s;
+    }
+    match s.char_indices().nth(max_chars) {
+        Some((idx, _)) => &s[..idx],
+        None => s,
+    }
+}
+
 /// Calculate centered position for a popup of given dimensions.
 fn center_popup(term_w: u16, term_h: u16, popup_w: u16, popup_h: u16) -> (u16, u16) {
     let x = term_w.saturating_sub(popup_w) / 2;
@@ -63,13 +74,10 @@ fn draw_popup_frame(
 
     // Top border: ┌─ Title ─┐
     queue!(buf, MoveTo(x, y), SetForegroundColor(colors.border_fg), SetBackgroundColor(colors.border_bg))?;
-    let title_display = if title.len() > inner_w.saturating_sub(2) {
-        &title[..inner_w.saturating_sub(2)]
-    } else {
-        title
-    };
-    let left_pad = (inner_w.saturating_sub(title_display.len())) / 2;
-    let right_pad = inner_w.saturating_sub(title_display.len()).saturating_sub(left_pad);
+    let title_display = truncate_chars(title, inner_w.saturating_sub(2));
+    let title_len = title_display.chars().count();
+    let left_pad = inner_w.saturating_sub(title_len) / 2;
+    let right_pad = inner_w.saturating_sub(title_len).saturating_sub(left_pad);
     let top = format!("┌{}{}{}┐",
         "─".repeat(left_pad),
         title_display,
@@ -96,9 +104,11 @@ fn draw_popup_frame(
 /// Display an info popup. Any key dismisses it.
 pub fn popup_info(title: &str, lines: &[String], colors: &PopupColors) -> Result<()> {
     let (tw, th) = size()?;
-    let max_line_len = lines.iter().map(|l| l.len()).max().unwrap_or(10);
-    let popup_w = (max_line_len + 4).min(tw as usize - 4) as u16;
-    let popup_h = (lines.len() as u16 + 2).min(th - 2);
+    if tw < 10 || th < 5 { return Ok(()); }
+
+    let max_line_len = lines.iter().map(|l| l.chars().count()).max().unwrap_or(10);
+    let popup_w = (max_line_len + 4).min(tw.saturating_sub(4) as usize) as u16;
+    let popup_h = (lines.len() as u16 + 2).min(th.saturating_sub(2));
     let (px, py) = center_popup(tw, th, popup_w, popup_h);
     let inner_w = (popup_w - 2) as usize;
 
@@ -110,11 +120,7 @@ pub fn popup_info(title: &str, lines: &[String], colors: &PopupColors) -> Result
     for (i, line) in lines.iter().take(visible_lines).enumerate() {
         queue!(buf, MoveTo(px + 1, py + 1 + i as u16),
             SetForegroundColor(colors.content_fg), SetBackgroundColor(colors.content_bg))?;
-        let display = if line.len() > inner_w {
-            &line[..inner_w]
-        } else {
-            line
-        };
+        let display = truncate_chars(line, inner_w);
         let padded = format!("{:<width$}", display, width = inner_w);
         queue!(buf, Print(padded))?;
     }
@@ -143,9 +149,11 @@ pub fn popup_menu(title: &str, items: &[String], colors: &PopupColors) -> Result
     }
 
     let (tw, th) = size()?;
-    let max_item_len = items.iter().map(|l| l.len()).max().unwrap_or(10);
-    let popup_w = (max_item_len + 6).min(tw as usize - 4) as u16; // +6 for borders + "> " prefix
-    let popup_h = (items.len() as u16 + 2).min(th - 2);
+    if tw < 10 || th < 5 { return Ok(PopupResult::Dismissed); }
+
+    let max_item_len = items.iter().map(|l| l.chars().count()).max().unwrap_or(10);
+    let popup_w = (max_item_len + 6).min(tw.saturating_sub(4) as usize) as u16;
+    let popup_h = (items.len() as u16 + 2).min(th.saturating_sub(2));
     let (px, py) = center_popup(tw, th, popup_w, popup_h);
     let inner_w = (popup_w - 2) as usize;
 
@@ -173,13 +181,13 @@ pub fn popup_menu(title: &str, items: &[String], colors: &PopupColors) -> Result
                 if item_idx == selected {
                     queue!(buf, SetForegroundColor(colors.highlight_fg), SetBackgroundColor(colors.highlight_bg))?;
                     let display = format!("> {}", &items[item_idx]);
-                    let truncated = if display.len() > inner_w { &display[..inner_w] } else { &display };
+                    let truncated = truncate_chars(&display, inner_w);
                     let padded = format!("{:<width$}", truncated, width = inner_w);
                     queue!(buf, Print(padded))?;
                 } else {
                     queue!(buf, SetForegroundColor(colors.content_fg), SetBackgroundColor(colors.content_bg))?;
                     let display = format!("  {}", &items[item_idx]);
-                    let truncated = if display.len() > inner_w { &display[..inner_w] } else { &display };
+                    let truncated = truncate_chars(&display, inner_w);
                     let padded = format!("{:<width$}", truncated, width = inner_w);
                     queue!(buf, Print(padded))?;
                 }
@@ -236,13 +244,15 @@ pub fn popup_menu(title: &str, items: &[String], colors: &PopupColors) -> Result
 /// Display a text input popup. Returns Text(string) or Dismissed.
 pub fn popup_input(title: &str, prompt: &str, default: &str, colors: &PopupColors) -> Result<PopupResult> {
     let (tw, th) = size()?;
-    let popup_w = 50u16.min(tw - 4);
-    let popup_h = 4u16; // border top + prompt + input + border bottom
+    if tw < 10 || th < 5 { return Ok(PopupResult::Dismissed); }
+
+    let popup_w = 50u16.min(tw.saturating_sub(4));
+    let popup_h = 4u16;
     let (px, py) = center_popup(tw, th, popup_w, popup_h);
     let inner_w = (popup_w - 2) as usize;
 
     let mut input = default.to_string();
-    let mut cursor_pos = input.len();
+    let mut cursor_pos = input.chars().count();
 
     loop {
         let mut buf: Vec<u8> = Vec::with_capacity(4 * 1024);
@@ -252,14 +262,19 @@ pub fn popup_input(title: &str, prompt: &str, default: &str, colors: &PopupColor
         // Prompt line
         queue!(buf, MoveTo(px + 1, py + 1),
             SetForegroundColor(colors.content_fg), SetBackgroundColor(colors.content_bg))?;
-        let prompt_display = if prompt.len() > inner_w { &prompt[..inner_w] } else { prompt };
+        let prompt_display = truncate_chars(prompt, inner_w);
         let padded_prompt = format!("{:<width$}", prompt_display, width = inner_w);
         queue!(buf, Print(padded_prompt))?;
 
         // Input line with cursor
         queue!(buf, MoveTo(px + 1, py + 2),
             SetForegroundColor(colors.highlight_fg), SetBackgroundColor(colors.highlight_bg))?;
-        let visible_input = if input.len() > inner_w { &input[input.len() - inner_w..] } else { &input };
+        let char_count = input.chars().count();
+        let visible_input: String = if char_count > inner_w {
+            input.chars().skip(char_count - inner_w).collect()
+        } else {
+            input.clone()
+        };
         let padded_input = format!("{:<width$}", visible_input, width = inner_w);
         queue!(buf, Print(padded_input))?;
 
@@ -287,25 +302,37 @@ pub fn popup_input(title: &str, prompt: &str, default: &str, colors: &PopupColor
                     }
                     KeyCode::Backspace => {
                         if cursor_pos > 0 {
-                            input.remove(cursor_pos - 1);
+                            let byte_idx = input.char_indices()
+                                .nth(cursor_pos - 1)
+                                .map(|(idx, _)| idx)
+                                .unwrap_or(0);
+                            input.remove(byte_idx);
                             cursor_pos -= 1;
                         }
                     }
                     KeyCode::Delete => {
-                        if cursor_pos < input.len() {
-                            input.remove(cursor_pos);
+                        if cursor_pos < input.chars().count() {
+                            let byte_idx = input.char_indices()
+                                .nth(cursor_pos)
+                                .map(|(idx, _)| idx)
+                                .unwrap_or(input.len());
+                            input.remove(byte_idx);
                         }
                     }
                     KeyCode::Left => {
                         if cursor_pos > 0 { cursor_pos -= 1; }
                     }
                     KeyCode::Right => {
-                        if cursor_pos < input.len() { cursor_pos += 1; }
+                        if cursor_pos < input.chars().count() { cursor_pos += 1; }
                     }
                     KeyCode::Home => { cursor_pos = 0; }
-                    KeyCode::End => { cursor_pos = input.len(); }
+                    KeyCode::End => { cursor_pos = input.chars().count(); }
                     KeyCode::Char(c) => {
-                        input.insert(cursor_pos, c);
+                        let byte_idx = input.char_indices()
+                            .nth(cursor_pos)
+                            .map(|(idx, _)| idx)
+                            .unwrap_or(input.len());
+                        input.insert(byte_idx, c);
                         cursor_pos += 1;
                     }
                     _ => {}
