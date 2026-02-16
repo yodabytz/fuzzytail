@@ -1,6 +1,6 @@
 [package]
 name = "fuzzytail"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 authors = ["yodabytz"]
 description = "A modern, colorful tail replacement with split-pane log monitoring"

@@ -66,11 +66,14 @@ impl TailProcessor {
         max_buffer_lines: usize,
     ) -> Result<Self> {
         let theme_name = &config.general.theme;
-        let theme_path = config.get_theme_path(theme_name)
-            .ok_or_else(|| anyhow!("Theme '{}' not found", theme_name))?;
-
-        let theme = Theme::load_from_file(&theme_path, theme_name.clone())
-            .with_context(|| format!("Failed to load theme from {:?}", theme_path))?;
+        let theme = if let Some(theme_path) = config.get_theme_path(theme_name) {
+            Theme::load_from_file(&theme_path, theme_name.clone())
+                .with_context(|| format!("Failed to load theme from {:?}", theme_path))?
+        } else if let Some(builtin) = Theme::load_builtin(theme_name) {
+            builtin?
+        } else {
+            return Err(anyhow!("Theme '{}' not found", theme_name));
+        };
 
         let colorizer = Colorizer::new(theme, no_color);
         let filter = LineFilter::new(include, exclude, level)?;

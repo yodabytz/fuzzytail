@@ -40,11 +40,31 @@ impl Color {
 }
 
 impl Theme {
+    const BUILTIN_CATPPUCCIN: &'static str = include_str!("../themes/ft.conf.catppuccin");
+    const BUILTIN_DRACULA: &'static str = include_str!("../themes/ft.conf.dracula");
+    const BUILTIN_LACKLUSTER: &'static str = include_str!("../themes/ft.conf.lackluster");
+    const BUILTIN_MIASMA: &'static str = include_str!("../themes/ft.conf.miasma");
+    const BUILTIN_ROSE_PINE: &'static str = include_str!("../themes/ft.conf.rose-pine");
+    const BUILTIN_TOKYO_NIGHT: &'static str = include_str!("../themes/ft.conf.tokyo-night");
+
     pub fn load_from_file<P: AsRef<Path>>(path: P, name: String) -> Result<Self> {
         let contents = fs::read_to_string(&path)
             .with_context(|| format!("Failed to read theme file: {:?}", path.as_ref()))?;
-        
+
         Self::parse_theme_contents(contents, name)
+    }
+
+    pub fn load_builtin(name: &str) -> Option<Result<Self>> {
+        let contents = match name {
+            "catppuccin" => Self::BUILTIN_CATPPUCCIN,
+            "dracula" => Self::BUILTIN_DRACULA,
+            "lackluster" => Self::BUILTIN_LACKLUSTER,
+            "miasma" => Self::BUILTIN_MIASMA,
+            "rose-pine" => Self::BUILTIN_ROSE_PINE,
+            "tokyo-night" => Self::BUILTIN_TOKYO_NIGHT,
+            _ => return None,
+        };
+        Some(Self::parse_theme_contents(contents.to_string(), name.to_string()))
     }
     
     fn parse_theme_contents(contents: String, name: String) -> Result<Self> {
