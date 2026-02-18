@@ -5,7 +5,7 @@ use crate::filter::LineFilter;
 use crate::output::{OutputFormat, OutputFormatter};
 use anyhow::{Context, Result, anyhow};
 use std::fs::File;
-use std::io::{BufRead, BufReader, stdin, Seek, SeekFrom};
+use std::io::{BufRead, BufReader, Write as IoWrite, stdin, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::collections::VecDeque;
 use notify::{Watcher, RecommendedWatcher, RecursiveMode, Config as NotifyConfig};
@@ -366,21 +366,15 @@ impl TailProcessor {
             }
 
             // Check for new content and log rotation
-            let mut content_changed = false;
             for tracker in &mut file_trackers {
-                let (rotated, had_new) = self.check_file_updates(tracker)?;
-                if had_new || rotated {
-                    content_changed = true;
-                }
+                let (rotated, _) = self.check_file_updates(tracker)?;
                 if rotated {
                     let _ = watcher.unwatch(&tracker.path);
                     let _ = watcher.watch(&tracker.path, RecursiveMode::NonRecursive);
                 }
             }
 
-            if content_changed {
-                self.render_frame(&file_trackers)?;
-            }
+            self.render_frame(&file_trackers)?;
 
             // Check keyboard
             if poll(Duration::from_millis(0))? {
