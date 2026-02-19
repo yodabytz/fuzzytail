@@ -593,7 +593,7 @@ impl TailProcessor {
             y += h;
         }
 
-        queue!(buf, EndSynchronizedUpdate)?;
+        queue!(buf, MoveTo(0, 0), Hide, EndSynchronizedUpdate)?;
 
         let mut stdout = io::stdout().lock();
         stdout.write_all(&buf)?;
