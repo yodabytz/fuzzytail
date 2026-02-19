@@ -13,7 +13,7 @@ mod popup;
 use config::Config;
 
 #[derive(Parser)]
-#[command(name = "ft")]
+#[command(name = "ft", version)]
 #[command(about = "A modern, colorful tail replacement with split-pane log monitoring")]
 struct Cli {
     /// Files to tail
