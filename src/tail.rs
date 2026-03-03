@@ -208,6 +208,10 @@ impl TailProcessor {
         let mut pos = file.seek(SeekFrom::End(0))?;
         let mut file_id = get_open_file_id(&file);
 
+        // Hide cursor to prevent flicker in tmux panes
+        let mut stdout = io::stdout();
+        execute!(stdout, Hide)?;
+
         let running = Arc::new(AtomicBool::new(true));
         let r = running.clone();
         ctrlc::set_handler(move || {
@@ -283,6 +287,10 @@ impl TailProcessor {
                 }
             }
         }
+
+        // Restore cursor on exit
+        let mut stdout = io::stdout();
+        let _ = execute!(stdout, Show);
 
         Ok(())
     }
