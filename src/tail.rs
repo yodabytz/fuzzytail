@@ -20,7 +20,7 @@ use crossterm::{
     event::{poll, read, Event, KeyCode, KeyModifiers, KeyEventKind},
     execute, queue,
 };
-use std::io::{self, Write};
+use std::io;
 
 struct FileTracker {
     path: PathBuf,
@@ -136,10 +136,10 @@ impl TailProcessor {
     }
 
     fn process_single_file(&mut self, file_path: &Path, lines: usize, follow: bool) -> Result<()> {
-        self.show_tail_lines(file_path, lines)?;
-
         if follow {
-            self.follow_file(file_path)?;
+            self.follow_file(file_path, lines)?;
+        } else {
+            self.show_tail_lines(file_path, lines)?;
         }
 
         Ok(())
@@ -198,100 +198,192 @@ impl TailProcessor {
         Ok(all_lines[start_idx..].to_vec())
     }
 
-    fn follow_file(&mut self, file_path: &Path) -> Result<()> {
-        let (tx, rx) = mpsc::channel();
+    fn follow_file(&mut self, file_path: &Path, initial_lines: usize) -> Result<()> {
+        use crossterm::terminal::{enable_raw_mode, disable_raw_mode};
 
-        let mut watcher: RecommendedWatcher = Watcher::new(tx, NotifyConfig::default())?;
-        watcher.watch(file_path, RecursiveMode::NonRecursive)?;
+        if let Err(_) = enable_raw_mode() {
+            return Ok(());
+        }
 
-        let mut file = File::open(file_path)?;
-        let mut pos = file.seek(SeekFrom::End(0))?;
-        let mut file_id = get_open_file_id(&file);
-
-        // Hide cursor to prevent flicker in tmux panes
         let mut stdout = io::stdout();
-        execute!(stdout, Hide)?;
+        if let Err(_) = execute!(stdout, EnterAlternateScreen, Hide) {
+            let _ = disable_raw_mode();
+            return Ok(());
+        }
 
-        let running = Arc::new(AtomicBool::new(true));
-        let r = running.clone();
-        ctrlc::set_handler(move || {
-            r.store(false, Ordering::SeqCst);
-        })?;
+        let result = self.follow_file_fullscreen(file_path, initial_lines);
 
-        while running.load(Ordering::SeqCst) {
-            // Check for log rotation (file at path replaced with new inode)
-            if let (Some(ref current_id), Some(path_id)) = (&file_id, get_file_id(file_path)) {
-                if *current_id != path_id {
-                    // Drain remaining data from old (rotated) file
-                    let old_size = file.metadata().map(|m| m.len()).unwrap_or(pos);
-                    if old_size > pos {
-                        file.seek(SeekFrom::Start(pos))?;
-                        let mut reader = BufReader::with_capacity(self.buffer_size, &file);
-                        let mut line = String::new();
-                        while reader.read_line(&mut line)? > 0 {
-                            let clean_line = line.trim_end();
-                            if self.filter.should_show_line(clean_line) {
-                                let colored_line = self.colorizer.colorize_line(clean_line);
-                                let formatted = self.output_formatter.format_line(clean_line, &colored_line);
-                                println!("{}", formatted);
-                            }
-                            line.clear();
-                        }
-                    }
+        let _ = execute!(stdout, Show, LeaveAlternateScreen);
+        let _ = disable_raw_mode();
+        result
+    }
 
-                    // Reopen the new file at the same path
-                    match File::open(file_path) {
-                        Ok(new_file) => {
-                            file = new_file;
-                            pos = 0;
-                            file_id = get_open_file_id(&file);
-                            let _ = watcher.unwatch(file_path);
-                            let _ = watcher.watch(file_path, RecursiveMode::NonRecursive);
-                        }
-                        Err(_) => {
-                            // New file not yet created, try next cycle
-                            thread::sleep(Duration::from_millis(100));
-                            continue;
-                        }
-                    }
-                }
-            }
+    fn follow_file_fullscreen(&mut self, file_path: &Path, initial_lines: usize) -> Result<()> {
+        let file = File::open(file_path)
+            .with_context(|| format!("Failed to open file: {:?}", file_path))?;
+        let pos = file.metadata()?.len();
+        let file_id = get_open_file_id(&file);
 
-            let current_size = file.seek(SeekFrom::End(0))?;
-            if current_size > pos {
-                file.seek(SeekFrom::Start(pos))?;
-                let mut reader = BufReader::with_capacity(self.buffer_size, &file);
+        let mut tracker = FileTracker {
+            path: file_path.to_path_buf(),
+            file,
+            position: pos,
+            lines: VecDeque::new(),
+            raw_lines: VecDeque::new(),
+            max_lines: self.max_buffer_lines,
+            line_count: 0,
+            last_update: std::time::SystemTime::now(),
+            file_id,
+            paused: false,
+            filter: None,
+            search_term: None,
+        };
 
-                let mut line = String::new();
-                while reader.read_line(&mut line)? > 0 {
-                    let clean_line = line.trim_end();
-                    if self.filter.should_show_line(clean_line) {
-                        let colored_line = self.colorizer.colorize_line(clean_line);
-                        let formatted = self.output_formatter.format_line(clean_line, &colored_line);
-                        println!("{}", formatted);
-                    }
-                    line.clear();
-                }
-
-                pos = current_size;
-            } else if current_size < pos {
-                // File truncated in place (e.g., copytruncate)
-                pos = 0;
-                file.seek(SeekFrom::Start(0))?;
-            }
-
-            match rx.try_recv() {
-                Ok(_) => {}
-                Err(_) => {
-                    thread::sleep(Duration::from_millis(100));
+        // Load initial lines
+        tracker.line_count = self.count_lines_in_file(&tracker.path).unwrap_or(0);
+        if let Ok(lines) = self.get_last_n_lines(File::open(file_path)?, initial_lines) {
+            for line in lines {
+                if self.filter.should_show_line(&line) {
+                    let colored_line = self.colorizer.colorize_line(&line);
+                    tracker.lines.push_back(colored_line);
+                    tracker.raw_lines.push_back(line);
                 }
             }
         }
 
-        // Restore cursor on exit
-        let mut stdout = io::stdout();
-        let _ = execute!(stdout, Show);
+        // Set up file watcher
+        let (tx, rx) = mpsc::channel();
+        let mut watcher: RecommendedWatcher = Watcher::new(tx, NotifyConfig::default())?;
+        watcher.watch(file_path, RecursiveMode::NonRecursive)?;
 
+        // Initial render
+        self.render_single_frame(&tracker)?;
+
+        loop {
+            // Drain watcher events
+            loop {
+                match rx.try_recv() {
+                    Ok(_) => {}
+                    Err(_) => break,
+                }
+            }
+
+            // Check for new content and log rotation
+            let (rotated, had_new) = self.check_file_updates(&mut tracker)?;
+            if rotated {
+                let _ = watcher.unwatch(&tracker.path);
+                let _ = watcher.watch(&tracker.path, RecursiveMode::NonRecursive);
+            }
+
+            // Only re-render when content actually changed
+            if had_new || rotated {
+                self.render_single_frame(&tracker)?;
+            }
+
+            // Check keyboard
+            if poll(Duration::from_millis(0))? {
+                if let Event::Key(key) = read()? {
+                    if key.kind == KeyEventKind::Release { continue; }
+                    match key.code {
+                        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => break,
+                        KeyCode::Char('q') | KeyCode::Esc => break,
+                        KeyCode::Enter => {
+                            // Add blank margin line
+                            tracker.lines.push_back(String::new());
+                            tracker.raw_lines.push_back(String::new());
+                            while tracker.lines.len() > tracker.max_lines {
+                                tracker.lines.pop_front();
+                            }
+                            while tracker.raw_lines.len() > tracker.max_lines {
+                                tracker.raw_lines.pop_front();
+                            }
+                            self.render_single_frame(&tracker)?;
+                        }
+                        // Pause/resume
+                        KeyCode::Char('p') => {
+                            tracker.paused = !tracker.paused;
+                            self.render_single_frame(&tracker)?;
+                        }
+                        // Scrollback browser
+                        KeyCode::Char('b') => {
+                            self.show_scrollback(&tracker)?;
+                            self.render_single_frame(&tracker)?;
+                        }
+                        // Search
+                        KeyCode::Char('/') => {
+                            let colors = crate::popup::PopupColors::from_theme(self.colorizer.get_theme());
+                            let result = crate::popup::popup_input(" Search ", "Search term (empty=clear):", "", &colors)?;
+                            if let crate::popup::PopupResult::Text(term) = result {
+                                tracker.search_term = if term.trim().is_empty() { None } else { Some(term.trim().to_string()) };
+                            }
+                            self.render_single_frame(&tracker)?;
+                        }
+                        // Clear buffer
+                        KeyCode::Char('o') => {
+                            tracker.lines.clear();
+                            tracker.raw_lines.clear();
+                            self.render_single_frame(&tracker)?;
+                        }
+                        // Save buffer
+                        KeyCode::Char('w') => {
+                            let colors = crate::popup::PopupColors::from_theme(self.colorizer.get_theme());
+                            let result = crate::popup::popup_input(" Save Buffer ", "Save to file:", "buffer.log", &colors)?;
+                            if let crate::popup::PopupResult::Text(save_path) = result {
+                                let save_path = save_path.trim();
+                                if !save_path.is_empty() {
+                                    if let Ok(mut f) = std::fs::File::create(save_path) {
+                                        use std::io::Write as _;
+                                        for line in &tracker.raw_lines {
+                                            let _ = writeln!(f, "{}", line);
+                                        }
+                                    }
+                                }
+                            }
+                            self.render_single_frame(&tracker)?;
+                        }
+                        // Help
+                        KeyCode::Char('h') | KeyCode::F(1) => {
+                            let colors = crate::popup::PopupColors::from_theme(self.colorizer.get_theme());
+                            let help_lines = vec![
+                                String::new(),
+                                "  q / ESC      Quit".to_string(),
+                                "  Ctrl+C       Emergency exit".to_string(),
+                                "  Enter        Add blank margin line".to_string(),
+                                "  p            Pause/resume".to_string(),
+                                "  b            Scrollback browser".to_string(),
+                                "  /            Search".to_string(),
+                                "  o            Clear buffer".to_string(),
+                                "  w            Save buffer to file".to_string(),
+                                "  h / F1       This help".to_string(),
+                            ];
+                            crate::popup::popup_info(" FuzzyTail Help ", &help_lines, &colors)?;
+                            self.render_single_frame(&tracker)?;
+                        }
+                        _ => {}
+                    }
+                }
+            }
+
+            thread::sleep(Duration::from_millis(100));
+        }
+
+        Ok(())
+    }
+
+    fn render_single_frame(&self, tracker: &FileTracker) -> Result<()> {
+        let (tw, th) = size()?;
+        if tw < 10 || th < 3 {
+            return Ok(());
+        }
+
+        let mut buf: Vec<u8> = Vec::with_capacity(64 * 1024);
+        queue!(buf, BeginSynchronizedUpdate)?;
+        self.write_pane(&mut buf, tracker, 0, 0, tw, th)?;
+        queue!(buf, MoveTo(0, 0), Hide, EndSynchronizedUpdate)?;
+
+        let mut stdout = io::stdout().lock();
+        stdout.write_all(&buf)?;
+        stdout.flush()?;
         Ok(())
     }
 
@@ -374,15 +466,21 @@ impl TailProcessor {
             }
 
             // Check for new content and log rotation
+            let mut needs_render = false;
             for tracker in &mut file_trackers {
-                let (rotated, _) = self.check_file_updates(tracker)?;
+                let (rotated, had_new) = self.check_file_updates(tracker)?;
                 if rotated {
                     let _ = watcher.unwatch(&tracker.path);
                     let _ = watcher.watch(&tracker.path, RecursiveMode::NonRecursive);
                 }
+                if rotated || had_new {
+                    needs_render = true;
+                }
             }
 
-            self.render_frame(&file_trackers)?;
+            if needs_render {
+                self.render_frame(&file_trackers)?;
+            }
 
             // Check keyboard
             if poll(Duration::from_millis(0))? {
